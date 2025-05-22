@@ -1,118 +1,87 @@
 import jwt from "jsonwebtoken"
-import { cookies } from "next/headers"
+import { serialize } from "cookie"
 import { NextResponse } from "next/server"
-import { auth } from "@clerk/nextjs/server"
-import User from "@/models/User"
+import connectToDatabase from "./db"
+import User from "../models/User"
 
 // Generate JWT token
 export const generateToken = (userId) => {
-  return jwt.sign({ id: userId }, process.env.JWT_SECRET, {
-    expiresIn: "30d",
+  return jwt.sign({ userId }, process.env.JWT_SECRET, {
+    expiresIn: "7d",
   })
 }
 
-// Set JWT token in cookie
-export const setTokenCookie = (res, token) => {
-  const cookieOptions = {
-    httpOnly: true,
-    secure: process.env.NODE_ENV !== "development",
-    sameSite: "strict",
-    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-    path: "/",
+// Verify JWT token
+export const verifyToken = (token) => {
+  try {
+    return jwt.verify(token, process.env.JWT_SECRET)
+  } catch (error) {
+    console.error("Token verification error:", error)
+    return null
   }
+}
 
-  res.cookies.set("token", token, cookieOptions)
-  return res
+// Set token cookie
+export const setTokenCookie = (res, token) => {
+  const cookie = serialize("token", token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    maxAge: 7 * 24 * 60 * 60, // 7 days
+    path: "/",
+  })
+
+  res.headers.set("Set-Cookie", cookie)
 }
 
 // Handle protected routes
-export const handleProtectedRoute = async (req, allowedRoles = []) => {
+export async function handleProtectedRoute(req, allowedUserTypes = []) {
   try {
-    // First try to get the token from the cookie
-    const cookieStore = cookies()
-    const token = cookieStore.get("token")?.value
+    await connectToDatabase()
 
-    // If no token in cookie, try to get from Authorization header
+    // Get token from Authorization header
     const authHeader = req.headers.get("Authorization")
     const headerToken = authHeader ? authHeader.split(" ")[1] : null
 
-    // Use token from cookie or header
-    const finalToken = token || headerToken
+    // Get token from cookie
+    const cookieToken = req.cookies.get("token")?.value
 
-    if (!finalToken) {
-      return {
-        success: false,
-        message: "Not authenticated",
-      }
+    // Use token from header or cookie
+    const token = headerToken || cookieToken || ""
+
+    if (!token) {
+      return NextResponse.json({ success: false, message: "Not authorized - No token" }, { status: 401 })
     }
 
     // Verify token
-    const decoded = jwt.verify(finalToken, process.env.JWT_SECRET)
+    const decoded = verifyToken(token)
+    if (!decoded) {
+      return NextResponse.json({ success: false, message: "Not authorized - Invalid token" }, { status: 401 })
+    }
 
-    // Find user
-    const user = await User.findById(decoded.id).select("-password")
+    // Get user
+    const user = await User.findById(decoded.userId).select("-password")
 
     if (!user) {
-      return {
-        success: false,
-        message: "User not found",
-      }
+      return NextResponse.json({ success: false, message: "No user found" }, { status: 404 })
     }
 
-    // Check if user has required role
-    if (allowedRoles.length > 0 && !allowedRoles.includes(user.userType)) {
-      return {
-        success: false,
-        message: "Not authorized to access this resource",
-      }
+    // Check if user is active
+    if (user.isActive === false) {
+      return NextResponse.json({ success: false, message: "Account is inactive" }, { status: 403 })
     }
 
-    // Return success with user
-    return {
-      success: true,
-      user,
+    // Check user type
+    if (allowedUserTypes.length > 0 && !allowedUserTypes.includes(user.userType)) {
+      return NextResponse.json(
+        { success: false, message: "Not authorized - Insufficient user rights" },
+        { status: 403 },
+      )
     }
+
+    return { success: true, user }
   } catch (error) {
-    console.error("Auth error:", error)
-    return {
-      success: false,
-      message: "Not authenticated",
-    }
-  }
-}
-
-// Middleware to check if user is authenticated with Clerk
-export const withClerkAuth = async (req) => {
-  try {
-    const { userId } = auth()
-
-    if (!userId) {
-      return NextResponse.json({ success: false, message: "Not authenticated" }, { status: 401 })
-    }
-
-    // Find user in our database
-    const user = await User.findOne({ clerkId: userId })
-
-    if (!user) {
-      return NextResponse.json({ success: false, message: "User not found" }, { status: 404 })
-    }
-
-    // Generate JWT token for our API
-    const token = generateToken(user._id)
-
-    // Set token in cookie
-    const response = NextResponse.next()
-    response.cookies.set("token", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV !== "development",
-      sameSite: "strict",
-      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-      path: "/",
-    })
-
-    return { success: true, user, response }
-  } catch (error) {
-    console.error("Clerk auth error:", error)
-    return NextResponse.json({ success: false, message: "Authentication error" }, { status: 500 })
+    console.error("Protected route error:", error)
+    return NextResponse.json({ success: false, message: "Not authorized - Token is invalid" }, { status: 401 })
   }
 }

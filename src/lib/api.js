@@ -55,9 +55,6 @@ export const authAPI = {
   register: async (userData) => {
     try {
       const response = await axios.post("/api/auth/register", userData)
-      if (response.data.token) {
-        localStorage.setItem("auth_token", response.data.token)
-      }
       return response.data
     } catch (error) {
       return handleApiError(error)
@@ -68,9 +65,6 @@ export const authAPI = {
   login: async (credentials) => {
     try {
       const response = await axios.post("/api/auth/login", credentials)
-      if (response.data.token) {
-        localStorage.setItem("auth_token", response.data.token)
-      }
       return response.data
     } catch (error) {
       return handleApiError(error)
@@ -80,11 +74,9 @@ export const authAPI = {
   // Logout a user
   logout: async () => {
     try {
-      localStorage.removeItem("auth_token")
       const response = await axios.post("/api/auth/logout")
       return response.data
     } catch (error) {
-      localStorage.removeItem("auth_token")
       return handleApiError(error)
     }
   },
@@ -93,40 +85,6 @@ export const authAPI = {
   getCurrentUser: async () => {
     try {
       const response = await axios.get("/api/auth/me")
-      return response.data
-    } catch (error) {
-      return handleApiError(error)
-    }
-  },
-
-  // Sync Clerk auth with our database and get JWT token
-  syncAuth: async () => {
-    try {
-      const response = await axios.get("/api/auth/sync")
-      if (response.data.token) {
-        localStorage.setItem("auth_token", response.data.token)
-      }
-      return response.data
-    } catch (error) {
-      return handleApiError(error)
-    }
-  },
-
-  // Update user profile
-  updateProfile: async (userId, profileData) => {
-    try {
-      const response = await axios.put(`/api/users/${userId}`, profileData)
-      return response.data
-    } catch (error) {
-      return handleApiError(error)
-    }
-  },
-
-  // Delete account
-  deleteAccount: async (userId) => {
-    try {
-      const response = await axios.delete(`/api/users/${userId}`)
-      localStorage.removeItem("auth_token")
       return response.data
     } catch (error) {
       return handleApiError(error)
@@ -157,16 +115,6 @@ export const jobAPI = {
   getJob: async (jobId) => {
     try {
       const response = await axios.get(`/api/jobs/${jobId}`)
-      return response.data
-    } catch (error) {
-      return handleApiError(error)
-    }
-  },
-
-  // Get jobs for a specific user
-  getUserJobs: async (userId) => {
-    try {
-      const response = await axios.get(`/api/jobs/user/${userId}`)
       return response.data
     } catch (error) {
       return handleApiError(error)
@@ -277,10 +225,10 @@ export const userAPI = {
     }
   },
 
-  // Get user by Clerk ID
-  getUserByClerkId: async (clerkId) => {
+  // Update user profile
+  updateProfile: async (userId, profileData) => {
     try {
-      const response = await axios.get(`/api/users/clerk/${clerkId}`)
+      const response = await axios.put(`/api/users/${userId}`, profileData)
       return response.data
     } catch (error) {
       return handleApiError(error)
@@ -291,16 +239,6 @@ export const userAPI = {
   getProviderDetails: async (providerId) => {
     try {
       const response = await axios.get(`/api/users/${providerId}?includeReviews=true`)
-      return response.data
-    } catch (error) {
-      return handleApiError(error)
-    }
-  },
-
-  // Get financial dashboard
-  getFinancialDashboard: async (userId) => {
-    try {
-      const response = await axios.get(`/api/users/financial-dashboard/${userId}`)
       return response.data
     } catch (error) {
       return handleApiError(error)
@@ -361,16 +299,6 @@ export const notificationAPI = {
   getNotifications: async () => {
     try {
       const response = await axios.get("/api/notifications")
-      return response.data
-    } catch (error) {
-      return handleApiError(error)
-    }
-  },
-
-  // Get user notifications
-  getUserNotifications: async () => {
-    try {
-      const response = await axios.get("/api/notifications/user")
       return response.data
     } catch (error) {
       return handleApiError(error)

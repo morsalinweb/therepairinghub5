@@ -2,245 +2,216 @@
 
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useAuth } from "@/contexts/auth-context"
+import { useToast } from "@/hooks/use-toast"
+import { useAppDispatch } from "@/lib/redux/hooks"
+import { addMessage } from "@/lib/redux/slices/messageSlice"
+import { addNotification } from "@/lib/redux/slices/notificationSlice"
 
-// Create an event emitter for WebSocket events
-export const eventEmitter = {
-  events: {},
-  on(event, callback) {
-    if (!this.events[event]) {
-      this.events[event] = []
-    }
-    this.events[event].push(callback)
-
-    // Return unsubscribe function
-    return () => {
-      this.events[event] = this.events[event].filter((cb) => cb !== callback)
-    }
-  },
-  emit(event, data) {
-    if (this.events[event]) {
-      this.events[event].forEach((callback) => callback(data))
-    }
-  },
-}
-
-export const useWebSocket = () => {
-  const [connected, setConnected] = useState(false)
-  const [reconnectAttempts, setReconnectAttempts] = useState(0)
+export function useWebSocket() {
+  const [socket, setSocket] = useState(null)
+  const [isConnected, setIsConnected] = useState(false)
   const { user, isAuthenticated } = useAuth()
-  const socket = useRef(null)
-  const subscriptions = useRef(new Set())
-  const reconnectTimeout = useRef(null)
-  const maxReconnectAttempts = 5
+  const { toast } = useToast()
+  const dispatch = useAppDispatch()
+  const reconnectTimeoutRef = useRef(null)
+  const jobSubscriptionsRef = useRef(new Set())
 
-  // Connect to WebSocket server
-  const connect = useCallback(() => {
-    if (!isAuthenticated || !user?._id) return
-
-    // Get token from localStorage
-    const token = localStorage.getItem("auth_token")
-    if (!token) return
-
-    // Close existing connection if any
-    if (socket.current && socket.current.readyState !== WebSocket.CLOSED) {
-      socket.current.close()
-    }
-
-    // Create new WebSocket connection with auth token
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
-    const wsUrl = `${protocol}//${window.location.host}/ws?token=${token}`
-
-    socket.current = new WebSocket(wsUrl)
-
-    socket.current.onopen = () => {
-      console.log("WebSocket connected")
-      setConnected(true)
-      setReconnectAttempts(0)
-
-      // Resubscribe to all channels
-      subscriptions.current.forEach((channel) => {
-        sendMessage({
-          type: "subscribe",
-          channel,
-        })
-      })
-    }
-
-    socket.current.onclose = (event) => {
-      console.log("WebSocket disconnected", event)
-      setConnected(false)
-
-      // Attempt to reconnect if not closed intentionally
-      if (event.code !== 1000) {
-        attemptReconnect()
-      }
-    }
-
-    socket.current.onerror = (error) => {
-      console.error("WebSocket error:", error)
-      setConnected(false)
-    }
-
-    socket.current.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data)
-
-        // Handle different message types
-        switch (data.type) {
-          case "notification":
-            eventEmitter.emit("notification", data.payload)
-            break
-          case "message":
-            eventEmitter.emit("new_message", data.payload)
-            break
-          case "job_update":
-            eventEmitter.emit("job_update", data.payload)
-            break
-          default:
-            // If the message has a channel, emit event for that channel
-            if (data.channel) {
-              eventEmitter.emit(data.channel, data.payload)
-            }
-        }
-      } catch (error) {
-        console.error("Error parsing WebSocket message:", error)
-      }
-    }
-
-    return () => {
-      if (socket.current) {
-        socket.current.close(1000, "Component unmounted")
-      }
-    }
-  }, [isAuthenticated, user])
-
-  // Attempt to reconnect with exponential backoff
-  const attemptReconnect = useCallback(() => {
-    if (reconnectAttempts >= maxReconnectAttempts) {
-      console.log("Max reconnect attempts reached")
-      return
-    }
-
-    const delay = Math.min(1000 * 2 ** reconnectAttempts, 30000)
-    console.log(`Attempting to reconnect in ${delay}ms (attempt ${reconnectAttempts + 1})`)
-
-    clearTimeout(reconnectTimeout.current)
-    reconnectTimeout.current = setTimeout(() => {
-      setReconnectAttempts((prev) => prev + 1)
-      connect()
-    }, delay)
-  }, [reconnectAttempts, connect])
-
-  // Connect on mount and when auth changes
+  // Initialize WebSocket connection
   useEffect(() => {
-    if (isAuthenticated && user?._id) {
-      connect()
-    }
+    if (!isAuthenticated || !user) return
 
-    return () => {
-      clearTimeout(reconnectTimeout.current)
-      if (socket.current) {
-        socket.current.close(1000, "Component unmounted")
+    const connectWebSocket = () => {
+      try {
+        console.log(
+          "Connecting to WebSocket:",
+          `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws`,
+        )
+        const ws = new WebSocket(
+          `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws`,
+        )
+
+        ws.onopen = () => {
+          console.log("WebSocket connection established")
+          setIsConnected(true)
+          setSocket(ws)
+
+          // Resubscribe to job updates
+          jobSubscriptionsRef.current.forEach((jobId) => {
+            ws.send(JSON.stringify({ type: "join_job", jobId }))
+          })
+        }
+
+        ws.onclose = (event) => {
+          console.log("WebSocket connection closed:", event.code, event.reason)
+          setIsConnected(false)
+          setSocket(null)
+
+          // Attempt to reconnect after delay
+          if (reconnectTimeoutRef.current) {
+            clearTimeout(reconnectTimeoutRef.current)
+          }
+
+          reconnectTimeoutRef.current = setTimeout(() => {
+            console.log("Attempting to reconnect WebSocket...")
+            connectWebSocket()
+          }, 3000)
+        }
+
+        ws.onerror = (error) => {
+          console.error("WebSocket error:", error)
+        }
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data)
+            console.log("WebSocket message received:", data)
+
+            // Handle different message types
+            switch (data.type) {
+              case "new_message":
+                handleNewMessage(data)
+                break
+              case "job_update":
+                handleJobUpdate(data)
+                break
+              case "notification":
+                handleNotification(data)
+                break
+              default:
+                console.log("Unknown message type:", data.type)
+            }
+          } catch (error) {
+            console.error("Error processing WebSocket message:", error)
+          }
+        }
+
+        return ws
+      } catch (error) {
+        console.error("Error creating WebSocket connection:", error)
+        return null
       }
     }
-  }, [isAuthenticated, user, connect])
 
-  // Send message through WebSocket
-  const sendMessage = useCallback((data) => {
-    if (!socket.current || socket.current.readyState !== WebSocket.OPEN) {
-      console.error("WebSocket not connected")
-      return false
+    const ws = connectWebSocket()
+
+    // Cleanup on unmount
+    return () => {
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current)
+      }
+
+      if (ws) {
+        ws.close()
+      }
     }
+  }, [isAuthenticated, user, dispatch])
 
-    socket.current.send(JSON.stringify(data))
-    return true
+  // Handle new message
+  const handleNewMessage = useCallback(
+    (data) => {
+      if (data.message) {
+        dispatch(addMessage(data.message))
+
+        // Dispatch custom event for real-time updates
+        window.dispatchEvent(
+          new CustomEvent("message-received", {
+            detail: data.message,
+          }),
+        )
+
+        // Show toast notification if the message is for the current user
+        if (data.message.recipient && data.message.recipient._id === user?._id) {
+          toast({
+            title: `New message from ${data.message.sender?.name || "User"}`,
+            description: data.message.message?.substring(0, 50) + (data.message.message?.length > 50 ? "..." : ""),
+          })
+        }
+      }
+
+      if (data.notification) {
+        dispatch(addNotification(data.notification))
+
+        // Dispatch custom event for notification updates
+        window.dispatchEvent(
+          new CustomEvent("notification-update", {
+            type: "notification/addNotification",
+            payload: data.notification,
+          }),
+        )
+      }
+    },
+    [dispatch, toast, user],
+  )
+
+  // Handle job update
+  const handleJobUpdate = useCallback((data) => {
+    // Dispatch custom event for job updates
+    window.dispatchEvent(
+      new CustomEvent("job-update", {
+        detail: data,
+      }),
+    )
   }, [])
 
-  // Subscribe to a channel
-  const subscribe = useCallback(
-    (channel, callback) => {
-      if (!channel) return () => {}
+  // Handle notification
+  const handleNotification = useCallback(
+    (data) => {
+      if (data.notification) {
+        dispatch(addNotification(data.notification))
 
-      // Add to subscriptions set
-      subscriptions.current.add(channel)
-
-      // Subscribe on server if connected
-      if (connected && socket.current) {
-        sendMessage({
-          type: "subscribe",
-          channel,
-        })
-      }
-
-      // Register event listener
-      return eventEmitter.on(channel, callback)
-    },
-    [connected, sendMessage],
-  )
-
-  // Unsubscribe from a channel
-  const unsubscribe = useCallback(
-    (channel) => {
-      if (!channel) return
-
-      // Remove from subscriptions set
-      subscriptions.current.delete(channel)
-
-      // Unsubscribe on server if connected
-      if (connected && socket.current) {
-        sendMessage({
-          type: "unsubscribe",
-          channel,
+        toast({
+          title: "New Notification",
+          description: data.notification.message,
         })
       }
     },
-    [connected, sendMessage],
+    [dispatch, toast],
   )
 
-  // Real-time updates for jobs
+  // Subscribe to job updates
   const subscribeToJobUpdates = useCallback(
     (jobId, callback) => {
       if (!jobId) return () => {}
 
-      const channel = `job:${jobId}:updates`
-      return subscribe(channel, callback)
-    },
-    [subscribe],
-  )
+      jobSubscriptionsRef.current.add(jobId)
 
-  // Start polling for messages
-  const startMessagePolling = useCallback(
-    (jobId, recipientId) => {
-      if (!jobId || !recipientId) return
+      if (socket && isConnected) {
+        socket.send(JSON.stringify({ type: "join_job", jobId }))
+      }
 
-      const channel = `job:${jobId}:messages:${recipientId}`
-      subscriptions.current.add(channel)
+      // Add event listener for job updates
+      const handleJobEvent = (event) => {
+        if (event.detail && event.detail.jobId === jobId) {
+          callback(event.detail)
+        }
+      }
 
-      if (connected && socket.current) {
-        sendMessage({
-          type: "subscribe",
-          channel,
-        })
+      window.addEventListener("job-update", handleJobEvent)
+
+      return () => {
+        jobSubscriptionsRef.current.delete(jobId)
+        window.removeEventListener("job-update", handleJobEvent)
       }
     },
-    [connected, sendMessage],
+    [socket, isConnected],
   )
 
-  // Stop polling for messages
-  const stopMessagePolling = useCallback(() => {
-    // We'll handle this through the unsubscribe mechanism
-    // when specific channels are provided
-  }, [])
+  // Send a message through WebSocket
+  const sendMessage = useCallback(
+    (data) => {
+      if (socket && isConnected) {
+        socket.send(JSON.stringify(data))
+        return true
+      }
+      return false
+    },
+    [socket, isConnected],
+  )
 
   return {
-    connected,
+    socket,
+    isConnected,
     sendMessage,
-    subscribe,
-    unsubscribe,
     subscribeToJobUpdates,
-    startMessagePolling,
-    stopMessagePolling,
-    reconnectAttempts,
-    maxReconnectAttempts,
   }
 }

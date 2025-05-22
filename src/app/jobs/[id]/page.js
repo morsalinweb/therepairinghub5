@@ -61,21 +61,51 @@ export default function JobDetails({ params }) {
   const messagesContainerRef = useRef(null)
   const { startMessagePolling, stopMessagePolling, subscribeToJobUpdates, sendMessage } = useRealTimeUpdates()
 
+  // Check authentication and fetch job details
   useEffect(() => {
-    // Wait for authentication to complete
-    if (authLoading) return
+    const fetchData = async () => {
+      if (authLoading) return
 
-    setAuthChecked(true)
+      setAuthChecked(true)
 
-    if (!isAuthenticated) {
-      // Store the current URL to redirect back after login
-      const currentPath = window.location.pathname
-      // If not authenticated, redirect to login
-      router.push(`/login?redirect=${encodeURIComponent(currentPath)}`)
-      return
+      if (!isAuthenticated) {
+        // Store the current URL to redirect back after login
+        const currentPath = window.location.pathname
+        // If not authenticated, redirect to login
+        router.push(`/login?redirect=${encodeURIComponent(currentPath)}`)
+        return
+      }
+
+      try {
+        setIsLoading(true)
+        const { success, job, quotes } = await jobAPI.getJob(params.id)
+
+        if (success && job) {
+          dispatch(setCurrentJob(job))
+          dispatch(setQuotes(quotes || []))
+
+          // Set message recipient based on user type with null checks
+          if (user?.userType === "Buyer" && job.hiredProvider) {
+            setMessageRecipient(job.hiredProvider)
+            fetchMessages(job.hiredProvider._id)
+          } else if (user?.userType === "Seller" && job.postedBy) {
+            setMessageRecipient(job.postedBy)
+            fetchMessages(job.postedBy._id)
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching job:", error)
+        toast({
+          title: "Error",
+          description: "Failed to load job details.",
+          variant: "destructive",
+        })
+      } finally {
+        setIsLoading(false)
+      }
     }
 
-    fetchJobDetails()
+    fetchData()
 
     // Cleanup function
     return () => {
@@ -84,7 +114,7 @@ export default function JobDetails({ params }) {
       dispatch(setQuotes([]))
       stopMessagePolling()
     }
-  }, [params.id, isAuthenticated, authLoading, dispatch, router, stopMessagePolling])
+  }, [params.id, isAuthenticated, authLoading, dispatch, router, stopMessagePolling, user])
 
   // Subscribe to real-time job updates
   useEffect(() => {
@@ -148,36 +178,6 @@ export default function JobDetails({ params }) {
       messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight
     }
   }, [messages])
-
-  const fetchJobDetails = async () => {
-    try {
-      setIsLoading(true)
-      const { success, job, quotes } = await jobAPI.getJob(params.id)
-
-      if (success) {
-        dispatch(setCurrentJob(job))
-        dispatch(setQuotes(quotes || []))
-
-        // Set message recipient based on user type
-        if (user?.userType === "Buyer" && job.hiredProvider) {
-          setMessageRecipient(job.hiredProvider)
-          fetchMessages(job.hiredProvider._id)
-        } else if (user?.userType === "Seller") {
-          setMessageRecipient(job.postedBy)
-          fetchMessages(job.postedBy._id)
-        }
-      }
-    } catch (error) {
-      console.error("Error fetching job:", error)
-      toast({
-        title: "Error",
-        description: "Failed to load job details.",
-        variant: "destructive",
-      })
-    } finally {
-      setIsLoading(false)
-    }
-  }
 
   const fetchMessages = async (recipientId) => {
     if (!recipientId) return
@@ -449,7 +449,7 @@ export default function JobDetails({ params }) {
                     </div>
                     <div className="flex items-center">
                       <Calendar className="h-4 w-4 mr-1" />
-                      {new Date(job.date).toLocaleDateString()}
+                      {new Date(job.date || job.createdAt).toLocaleDateString()}
                     </div>
                     <div className="flex items-center">
                       <Clock className="h-4 w-4 mr-1" />
@@ -506,20 +506,20 @@ export default function JobDetails({ params }) {
                   <div className="flex items-center mt-2">
                     <Avatar className="h-10 w-10 mr-3">
                       <AvatarImage
-                        src={job.postedBy?.avatar || "/placeholder.svg?height=40&width=40"}
-                        alt={job.postedBy?.name || "User"}
+                        src={job?.postedBy?.avatar || "/placeholder.svg?height=40&width=40"}
+                        alt={job?.postedBy?.name || "User"}
                       />
                       <AvatarFallback>
-                        {job.postedBy?.name
-                          ? job.postedBy.name
-                              .split(" ")
-                              .map((n) => n[0])
-                              .join("")
+                        {job?.postedBy?.name
+                          ? job?.postedBy?.name
+                            .split(" ")
+                            .map((n) => n[0])
+                            .join("")
                           : "U"}
                       </AvatarFallback>
                     </Avatar>
                     <div>
-                      <p className="font-medium">{job.postedBy?.name || job.postedBy?.email || "User"}</p>
+                      <p className="font-medium">{job?.postedBy?.name || job?.postedBy?.email || "User"}</p>
                       <p className="text-sm text-gray-500">Job Poster</p>
                     </div>
                   </div>
@@ -556,9 +556,9 @@ export default function JobDetails({ params }) {
                                   <AvatarFallback>
                                     {quote.provider?.name
                                       ? quote.provider.name
-                                          .split(" ")
-                                          .map((n) => n[0])
-                                          .join("")
+                                        .split(" ")
+                                        .map((n) => n[0])
+                                        .join("")
                                       : "P"}
                                   </AvatarFallback>
                                 </Avatar>
@@ -691,11 +691,10 @@ export default function JobDetails({ params }) {
                               className={`flex ${message.sender._id === user?._id ? "justify-end" : "justify-start"}`}
                             >
                               <div
-                                className={`max-w-[80%] rounded-lg p-3 ${
-                                  message.sender._id === user?._id
+                                className={`max-w-[80%] rounded-lg p-3 ${message.sender._id === user?._id
                                     ? "bg-blue-600 text-white"
                                     : "bg-gray-100 dark:bg-gray-800"
-                                }`}
+                                  }`}
                               >
                                 <div className="text-xs mb-1">
                                   {message.sender._id !== user?._id && (
@@ -807,20 +806,22 @@ export default function JobDetails({ params }) {
                   <div className="flex items-center">
                     <Avatar className="h-10 w-10 mr-3">
                       <AvatarImage
-                        src={job.hiredProvider?.avatar || "/placeholder.svg?height=40&width=40"}
-                        alt={job.hiredProvider?.name || "Provider"}
+                        src={job?.hiredProvider?.avatar || "/placeholder.svg?height=40&width=40"}
+                        alt={job?.hiredProvider?.name || "Provider"}
                       />
                       <AvatarFallback>
-                        {job.hiredProvider?.name
-                          ? job.hiredProvider.name
-                              .split(" ")
-                              .map((n) => n[0])
-                              .join("")
+                        {job?.hiredProvider?.name
+                          ? job?.hiredProvider.name
+                            .split(" ")
+                            .map((n) => n[0])
+                            .join("")
                           : "P"}
                       </AvatarFallback>
                     </Avatar>
                     <div>
-                      <p className="font-medium">{job.hiredProvider?.name || job.hiredProvider?.email || "Provider"}</p>
+                      <p className="font-medium">
+                        {job?.hiredProvider?.name || job?.hiredProvider?.email || "Provider"}
+                      </p>
                       <p className="text-sm text-gray-500">
                         ${quotes?.find((q) => q.provider?._id === job.hiredProvider?._id)?.price || job.price}
                       </p>

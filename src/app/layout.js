@@ -5,7 +5,7 @@ import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/toaster"
 import Header from "@/components/header"
 import Footer from "@/components/footer"
-// import { NotificationProvider } from "@/contexts/notification-context"
+import { NotificationProvider } from "@/contexts/notification-context"
 import { AuthProvider } from "@/contexts/auth-context"
 import { ClerkProvider } from "@clerk/nextjs"
 
@@ -23,25 +23,23 @@ const inter = Inter({ subsets: ["latin"] })
 
 export default function RootLayout({ children }) {
   return (
-    <ClerkProvider>
-      <html lang="en" suppressHydrationWarning>
-        <body className={inter.className}>
-          <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
-            <Provider store={store}> {/* ✅ Redux store wrapper */}
-              <AuthProvider>
-                {/* <NotificationProvider> */}
-                  <div className="flex min-h-screen flex-col">
-                    <Header />
-                    <main className="flex-1">{children}</main>
-                    <Footer />
-                  </div>
-                  <Toaster />
-                {/* </NotificationProvider> */}
-              </AuthProvider>
-            </Provider>
-          </ThemeProvider>
-        </body>
-      </html>
-    </ClerkProvider>
+    <html lang="en" suppressHydrationWarning>
+      <body className={inter.className}>
+        <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
+          <Provider store={store}> {/* ✅ Redux store wrapper */}
+            <AuthProvider>
+              <NotificationProvider>
+                <div className="flex min-h-screen flex-col">
+                  <Header />
+                  <main className="flex-1">{children}</main>
+                  <Footer />
+                </div>
+                <Toaster />
+              </NotificationProvider>
+            </AuthProvider>
+          </Provider>
+        </ThemeProvider>
+      </body>
+    </html>
   )
 }

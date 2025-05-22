@@ -24,7 +24,7 @@ const TransactionSchema = new mongoose.Schema(
     },
     serviceFee: {
       type: Number,
-      default: 0,
+      required: [true, "Please add a service fee"],
     },
     type: {
       type: String,

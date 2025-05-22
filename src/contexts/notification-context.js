@@ -1,53 +1,58 @@
 "use client"
 
-import { createContext, useContext, useState, useEffect, useCallback } from "react"
+import { createContext, useContext, useState, useEffect } from "react"
 import { notificationAPI } from "@/lib/api"
 import { useAuth } from "./auth-context"
-import { useWebSocket } from "@/hooks/use-websocket"
+import { eventEmitter } from "@/lib/websocket-client"
 
 const NotificationContext = createContext()
 
-export const NotificationProvider = ({ children }) => {
+export function NotificationProvider({ children }) {
   const [notifications, setNotifications] = useState([])
   const [unreadCount, setUnreadCount] = useState(0)
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const { user, isAuthenticated } = useAuth()
-  const { connected, sendMessage, subscribe, unsubscribe } = useWebSocket()
 
-  // Fetch notifications on initial load
+  // Fetch notifications on auth change
   useEffect(() => {
-    if (isAuthenticated && user?._id) {
+    if (isAuthenticated) {
       fetchNotifications()
-
-      // Subscribe to user-specific notification channel
-      subscribe(`user:${user._id}:notifications`, handleNewNotification)
-
-      return () => {
-        // Unsubscribe when component unmounts
-        unsubscribe(`user:${user._id}:notifications`)
-      }
+    } else {
+      setNotifications([])
+      setUnreadCount(0)
+      setLoading(false)
     }
-  }, [isAuthenticated, user, subscribe, unsubscribe])
+  }, [isAuthenticated])
 
-  // Handle new notifications from WebSocket
-  const handleNewNotification = useCallback((notification) => {
-    setNotifications((prev) => [notification, ...prev])
-    setUnreadCount((prev) => prev + 1)
-  }, [])
+  // Listen for new notifications
+  useEffect(() => {
+    if (!isAuthenticated || !user?._id) return
 
-  // Fetch notifications from API
+    // Use our event emitter for notifications
+    const unsubscribe = eventEmitter.on(`notification_${user._id}`, (notification) => {
+      if (notification.recipient === user._id) {
+        setNotifications((prev) => [notification, ...prev])
+        setUnreadCount((prev) => prev + 1)
+      }
+    })
+
+    return unsubscribe
+  }, [isAuthenticated, user])
+
+  // Fetch notifications
   const fetchNotifications = async () => {
     if (!isAuthenticated) return
 
-    setLoading(true)
     try {
-      const { success, notifications, unreadCount } = await notificationAPI.getUserNotifications()
+      setLoading(true)
+      const { success, notifications } = await notificationAPI.getNotifications()
+
       if (success) {
         setNotifications(notifications || [])
-        setUnreadCount(unreadCount || 0)
+        setUnreadCount(notifications.filter((n) => !n.read).length || 0)
       }
     } catch (error) {
-      console.error("Fetch notifications error:", error)
+      console.error("Error fetching notifications:", error)
     } finally {
       setLoading(false)
     }
@@ -57,25 +62,13 @@ export const NotificationProvider = ({ children }) => {
   const markAsRead = async (notificationId) => {
     try {
       const { success } = await notificationAPI.markAsRead(notificationId)
-      if (success) {
-        setNotifications((prev) =>
-          prev.map((notification) =>
-            notification._id === notificationId ? { ...notification, read: true } : notification,
-          ),
-        )
-        setUnreadCount((prev) => Math.max(0, prev - 1))
 
-        // Inform server via WebSocket that notification was read
-        if (connected && user?._id) {
-          sendMessage({
-            type: "notification_read",
-            userId: user._id,
-            notificationId,
-          })
-        }
+      if (success) {
+        setNotifications((prev) => prev.map((n) => (n._id === notificationId ? { ...n, read: true } : n)))
+        setUnreadCount((prev) => Math.max(0, prev - 1))
       }
     } catch (error) {
-      console.error("Mark notification error:", error)
+      console.error("Error marking notification as read:", error)
     }
   }
 
@@ -83,20 +76,33 @@ export const NotificationProvider = ({ children }) => {
   const markAllAsRead = async () => {
     try {
       const { success } = await notificationAPI.markAllAsRead()
-      if (success) {
-        setNotifications((prev) => prev.map((notification) => ({ ...notification, read: true })))
-        setUnreadCount(0)
 
-        // Inform server via WebSocket that all notifications were read
-        if (connected && user?._id) {
-          sendMessage({
-            type: "notifications_read_all",
-            userId: user._id,
-          })
+      if (success) {
+        setNotifications((prev) => prev.map((n) => ({ ...n, read: true })))
+        setUnreadCount(0)
+      }
+    } catch (error) {
+      console.error("Error marking all notifications as read:", error)
+    }
+  }
+
+  // Delete notification
+  const deleteNotification = async (notificationId) => {
+    try {
+      const { success } = await notificationAPI.deleteNotification(notificationId)
+
+      if (success) {
+        const notification = notifications.find((n) => n._id === notificationId)
+        const wasUnread = notification && !notification.read
+
+        setNotifications((prev) => prev.filter((n) => n._id !== notificationId))
+
+        if (wasUnread) {
+          setUnreadCount((prev) => Math.max(0, prev - 1))
         }
       }
     } catch (error) {
-      console.error("Mark all notifications error:", error)
+      console.error("Error deleting notification:", error)
     }
   }
 
@@ -109,7 +115,7 @@ export const NotificationProvider = ({ children }) => {
         fetchNotifications,
         markAsRead,
         markAllAsRead,
-        connected: connected,
+        deleteNotification,
       }}
     >
       {children}

@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server"
-import connectToDatabase from "../../../../lib/db"
-import User from "../../../../models/User"
-import { generateToken, setTokenCookie } from "../../../../lib/auth"
+import bcrypt from "bcryptjs"
+import jwt from "jsonwebtoken"
+import connectToDatabase from "@/lib/db"
+import User from "@/models/User"
 
 export async function POST(req) {
   try {
@@ -9,53 +10,82 @@ export async function POST(req) {
 
     const { email, password } = await req.json()
 
-    // Validate input
     if (!email || !password) {
-      return NextResponse.json({ success: false, message: "Please provide email and password" }, { status: 400 })
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Please provide email and password",
+        },
+        { status: 400 },
+      )
     }
 
-    // Find user
-    const user = await User.findOne({ email }).select("+password")
+    const user = await User.findOne({ email })
+
     if (!user) {
-      return NextResponse.json({ success: false, message: "Invalid credentials" }, { status: 401 })
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Invalid credentials",
+        },
+        { status: 401 },
+      )
     }
 
-    // Check if password matches
-    const isMatch = await user.matchPassword(password)
-    if (!isMatch) {
-      return NextResponse.json({ success: false, message: "Invalid credentials" }, { status: 401 })
+    // Make sure user.password exists before comparing
+    if (!user.password) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Account error. Please contact support.",
+        },
+        { status: 500 },
+      )
     }
 
-    // Check if user is active - check both status and isActive fields for compatibility
-    if ((user.status && user.status !== "active") || user.isActive === false) {
-      // Automatically activate the account if it's inactive
-      user.isActive = true
-      if (user.status) user.status = "active"
-      await user.save()
+    const isPasswordMatched = await bcrypt.compare(password, user.password)
 
-      // Continue with login since we've activated the account
+    if (!isPasswordMatched) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Invalid credentials",
+        },
+        { status: 401 },
+      )
     }
 
-    // Generate token
-    const token = generateToken(user._id)
+    // Create JWT Token
+    const token = jwt.sign(
+      { id: user._id, email: user.email },
+      process.env.JWT_SECRET || "fallback_secret_do_not_use_in_production",
+      { expiresIn: "7d" },
+    )
 
-    // Create response
-    const response = NextResponse.json({
+    return NextResponse.json({
       success: true,
       user: {
         _id: user._id,
         email: user.email,
         name: user.name,
+        phone: user.phone,
         userType: user.userType,
+        bio: user.bio,
+        avatar: user.avatar,
+        services: user.services,
+        status: user.status,
+        createdAt: user.createdAt,
       },
+      token: token,
     })
-
-    // Set token cookie
-    setTokenCookie(response, token)
-
-    return response
   } catch (error) {
-    console.error("Login error:", error)
-    return NextResponse.json({ success: false, message: error.message }, { status: 500 })
+    console.error("LOGIN_ERROR", error)
+    return NextResponse.json(
+      {
+        success: false,
+        message: error.message || "Internal Server Error",
+      },
+      { status: 500 },
+    )
   }
 }

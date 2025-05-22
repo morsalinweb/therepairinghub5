@@ -1,10 +1,9 @@
-// api/users/[id]/financial-dashboard/route.js
 import { NextResponse } from "next/server"
-import connectToDatabase from "../../../../lib/db"
-import Transaction from "../../../../models/Transaction"
-import User from "../../../../models/User"
-import Job from "../../../../models/Job"
-import { handleProtectedRoute } from "../../../../lib/auth"
+import connectToDatabase from "@/lib/db"
+import Transaction from "@/models/Transaction"
+import User from "@/models/User"
+import Job from "@/models/Job"
+import { handleProtectedRoute } from "@/lib/auth"
 import mongoose from "mongoose"
 
 export async function GET(req) {
@@ -41,9 +40,9 @@ export async function GET(req) {
     // Get recent transactions
     let transactionQuery = {}
     if (user.userType === "Buyer") {
-      transactionQuery = { customer: new mongoose.Types.ObjectId(userId) }
+      transactionQuery = { customer: userId }
     } else if (user.userType === "Seller") {
-      transactionQuery = { provider: new mongoose.Types.ObjectId(userId) }
+      transactionQuery = { provider: userId }
     }
 
     console.log(`Transaction query: ${JSON.stringify(transactionQuery)}`)
@@ -136,7 +135,7 @@ export async function GET(req) {
         // Calculate total amount
         let monthlyAmount = 0
         for (const tx of monthTransactions) {
-          monthlyAmount += tx.amount - tx.serviceFee
+          monthlyAmount += tx.amount - (tx.serviceFee || 0)
         }
 
         console.log(`Found ${monthTransactions.length} transactions for ${month + 1}/${year}, total: ${monthlyAmount}`)
@@ -189,7 +188,7 @@ export async function GET(req) {
         await job.save()
 
         // Calculate provider amount (minus service fee)
-        const providerAmount = transaction.amount - transaction.serviceFee
+        const providerAmount = transaction.amount - (transaction.serviceFee || 0)
 
         // Update provider's available balance and total earnings
         await User.findByIdAndUpdate(job.hiredProvider, {

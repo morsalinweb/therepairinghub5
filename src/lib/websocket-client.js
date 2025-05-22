@@ -1,174 +1,164 @@
-// WebSocket client utilities
+"use client"
 
-// Event emitter for real-time updates
-export const eventEmitter = {
-  events: {},
-  on(event, callback) {
+import { useState, useEffect, useCallback } from "react"
+import { useAuth } from "@/contexts/auth-context"
+import { useToast } from "@/hooks/use-toast"
+
+// Create a global event emitter for real-time updates
+class EventEmitter {
+  constructor() {
+    this.events = {}
+  }
+
+  on(event, listener) {
     if (!this.events[event]) {
       this.events[event] = []
     }
-    this.events[event].push(callback)
+    this.events[event].push(listener)
+    return () => this.off(event, listener)
+  }
 
-    // Return unsubscribe function
-    return () => {
-      this.events[event] = this.events[event].filter((cb) => cb !== callback)
-    }
-  },
-  emit(event, data) {
-    if (this.events[event]) {
-      this.events[event].forEach((callback) => callback(data))
-    }
-  },
+  off(event, listener) {
+    if (!this.events[event]) return
+    this.events[event] = this.events[event].filter((l) => l !== listener)
+  }
+
+  emit(event, ...args) {
+    if (!this.events[event]) return
+    this.events[event].forEach((listener) => listener(...args))
+  }
 }
 
-// Real-time updates utility
-export const useRealTimeUpdates = () => {
-  // Get WebSocket instance
-  const getWebSocket = () => {
-    // Check if we're in a browser environment
-    if (typeof window === "undefined") return null
+// Create a singleton instance
+export const eventEmitter =
+  typeof window !== "undefined" ? window.eventEmitter || new EventEmitter() : new EventEmitter()
 
-    // Get token from localStorage
-    const token = localStorage.getItem("auth_token")
-    if (!token) return null
+// Assign to window in browser environment
+if (typeof window !== "undefined") {
+  window.eventEmitter = eventEmitter
+}
 
-    // Create WebSocket URL with token
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
-    const wsUrl = `${protocol}//${window.location.host}/ws?token=${token}`
+// Hook for real-time updates
+export function useRealTimeUpdates() {
+  const { user, isAuthenticated } = useAuth()
+  const { toast } = useToast()
+  const [isPolling, setIsPolling] = useState(false)
+  const [lastMessageTime, setLastMessageTime] = useState(Date.now())
+  const [currentJobId, setCurrentJobId] = useState(null)
+  const [currentRecipientId, setCurrentRecipientId] = useState(null)
 
-    // Create and return WebSocket instance
-    return new WebSocket(wsUrl)
-  }
+  // Start polling for new messages
+  const startMessagePolling = useCallback(
+    (jobId, recipientId) => {
+      if (!jobId || !recipientId || !isAuthenticated) return
 
-  // Send message through WebSocket
-  const sendMessage = async (jobId, recipientId, content) => {
-    try {
-      // First send through REST API
-      const response = await fetch("/api/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
-        },
-        body: JSON.stringify({
-          jobId,
-          receiverId: recipientId,
-          content,
-        }),
-      })
+      setCurrentJobId(jobId)
+      setCurrentRecipientId(recipientId)
+      setIsPolling(true)
+    },
+    [isAuthenticated],
+  )
 
-      const data = await response.json()
+  // Stop polling
+  const stopMessagePolling = useCallback(() => {
+    setIsPolling(false)
+    setCurrentJobId(null)
+    setCurrentRecipientId(null)
+  }, [])
 
-      if (data.success) {
-        // Emit event for local state update
-        eventEmitter.emit("new_message", data.message)
-        return true
+  // Poll for new messages
+  useEffect(() => {
+    if (!isPolling || !currentJobId || !currentRecipientId || !isAuthenticated) return
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const response = await fetch(
+          `/api/messages?job=${currentJobId}&user=${currentRecipientId}&since=${lastMessageTime}`,
+          {
+            credentials: "include",
+          },
+        )
+
+        if (response.ok) {
+          const data = await response.json()
+          if (data.success && data.messages && data.messages.length > 0) {
+            // Update last message time
+            const newestMessage = data.messages.reduce(
+              (newest, msg) =>
+                new Date(msg.createdAt).getTime() > new Date(newest.createdAt).getTime() ? msg : newest,
+              data.messages[0],
+            )
+
+            setLastMessageTime(new Date(newestMessage.createdAt).getTime())
+
+            // Emit event for new messages
+            data.messages.forEach((message) => {
+              eventEmitter.emit("new_message", message)
+            })
+          }
+        }
+      } catch (error) {
+        console.error("Error polling for messages:", error)
       }
+    }, 3000) // Poll every 3 seconds
 
-      return false
-    } catch (error) {
-      console.error("Error sending message:", error)
-      return false
-    }
-  }
+    return () => clearInterval(pollInterval)
+  }, [isPolling, currentJobId, currentRecipientId, lastMessageTime, isAuthenticated])
 
   // Subscribe to job updates
-  const subscribeToJobUpdates = (jobId, callback) => {
+  const subscribeToJobUpdates = useCallback((jobId, callback) => {
     if (!jobId) return () => {}
 
-    // Create WebSocket if needed
-    const ws = getWebSocket()
+    // Set up event listener
+    const unsubscribe = eventEmitter.on(`job_update_${jobId}`, callback)
 
-    if (ws) {
-      // Subscribe to job updates when WebSocket is open
-      const onOpen = () => {
-        ws.send(
-          JSON.stringify({
-            type: "subscribe",
-            channel: `job:${jobId}:updates`,
+    // Start polling for this job
+    setCurrentJobId(jobId)
+
+    return unsubscribe
+  }, [])
+
+  // Send a message
+  const sendMessage = useCallback(
+    async (jobId, receiverId, content) => {
+      if (!jobId || !receiverId || !content || !isAuthenticated) return false
+
+      try {
+        const response = await fetch("/api/messages", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          credentials: "include",
+          body: JSON.stringify({
+            jobId,
+            receiverId,
+            content,
           }),
-        )
-      }
+        })
 
-      // Handle WebSocket open event
-      if (ws.readyState === WebSocket.OPEN) {
-        onOpen()
-      } else {
-        ws.addEventListener("open", onOpen)
-      }
+        const data = await response.json()
 
-      // Handle WebSocket messages
-      const onMessage = (event) => {
-        try {
-          const data = JSON.parse(event.data)
-
-          if (data.channel === `job:${jobId}:updates`) {
-            callback(data.payload)
-          }
-        } catch (error) {
-          console.error("Error parsing WebSocket message:", error)
+        if (data.success && data.message) {
+          // Emit event for the new message
+          eventEmitter.emit("new_message", data.message)
+          return true
         }
+
+        return false
+      } catch (error) {
+        console.error("Error sending message:", error)
+        return false
       }
-
-      ws.addEventListener("message", onMessage)
-
-      // Return cleanup function
-      return () => {
-        ws.removeEventListener("message", onMessage)
-
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(
-            JSON.stringify({
-              type: "unsubscribe",
-              channel: `job:${jobId}:updates`,
-            }),
-          )
-        }
-      }
-    }
-
-    // Register event listener as fallback
-    return eventEmitter.on(`job:${jobId}:updates`, callback)
-  }
-
-  // Start polling for messages
-  const startMessagePolling = (jobId, recipientId) => {
-    if (!jobId || !recipientId) return
-
-    // Create WebSocket if needed
-    const ws = getWebSocket()
-
-    if (ws) {
-      // Subscribe to message updates when WebSocket is open
-      const onOpen = () => {
-        ws.send(
-          JSON.stringify({
-            type: "subscribe",
-            channel: `job:${jobId}:messages:${recipientId}`,
-          }),
-        )
-      }
-
-      // Handle WebSocket open event
-      if (ws.readyState === WebSocket.OPEN) {
-        onOpen()
-      } else {
-        ws.addEventListener("open", onOpen)
-      }
-    }
-  }
-
-  // Stop polling for messages
-  const stopMessagePolling = () => {
-    // This is handled by the WebSocket connection closing
-    // or by unsubscribing from specific channels
-  }
+    },
+    [isAuthenticated],
+  )
 
   return {
-    eventEmitter,
-    sendMessage,
-    subscribeToJobUpdates,
     startMessagePolling,
     stopMessagePolling,
+    subscribeToJobUpdates,
+    sendMessage,
+    isPolling,
   }
 }

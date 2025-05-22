@@ -1,61 +1,51 @@
-// api/auth/register/route.js
 import { NextResponse } from "next/server"
-import connectToDatabase from "../../../../lib/db"
-import User from "../../../../models/User"
-import { generateToken } from "../../../../lib/auth"
+import bcrypt from "bcryptjs"
+import connectToDatabase from "@/lib/db"
+import User from "@/models/User"
+import { generateToken, setTokenCookie } from "@/lib/auth"
 
 export async function POST(req) {
   try {
     await connectToDatabase()
 
-    const { name, email, password, userType } = await req.json()
+    const { name, email, password, userType, phone } = await req.json()
 
     // Check if user already exists
     const userExists = await User.findOne({ email })
     if (userExists) {
-      return NextResponse.json({ success: false, message: "User with this email already exists" }, { status: 400 })
+      return NextResponse.json({ success: false, message: "User already exists" }, { status: 400 })
     }
 
-    // Create user with empty arrays for relationships
+    // Hash password
+    const salt = await bcrypt.genSalt(10)
+    const hashedPassword = await bcrypt.hash(password, salt)
+
+    // Create user
     const user = await User.create({
       name,
       email,
-      password,
-      userType: userType || "Buyer",
-      isActive: true,
-      postedJobs: [],
-      quotes: [],
-      reviews: [],
-      conversations: [],
-      notifications: [],
-      savedJobs: [],
-      transactions: [],
+      password: hashedPassword,
+      userType,
+      phone,
     })
 
-    // Generate token
+    // Generate JWT token
     const token = generateToken(user._id)
 
-    // Set cookie
+    // Create response
     const response = NextResponse.json({
       success: true,
+      token,
       user: {
         _id: user._id,
         name: user.name,
         email: user.email,
         userType: user.userType,
-        avatar: user.avatar,
-        isActive: user.isActive,
       },
     })
 
-    // Set cookie with token
-    response.cookies.set("token", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      maxAge: 30 * 24 * 60 * 60, // 30 days
-      path: "/",
-    })
+    // Set token cookie
+    setTokenCookie(response, token)
 
     return response
   } catch (error) {

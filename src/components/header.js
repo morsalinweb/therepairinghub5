@@ -9,33 +9,19 @@ import { Bell, Menu, X } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { useMobile } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
-// import { useNotifications } from "@/contexts/notification-context"
-import { useUser, useClerk } from "@clerk/nextjs"
+import { useAuth } from "@/contexts/auth-context"
+import { useNotifications } from "@/contexts/notification-context"
 
 export default function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const pathname = usePathname()
   const isMobile = useMobile()
   const { toast } = useToast()
-  const { user, isSignedIn, isLoaded } = useUser()
-  const { signOut } = useClerk()
-  // const { unreadCount } = useNotifications()
+  const { user, isAuthenticated, logout } = useAuth()
+  const { unreadCount } = useNotifications()
 
   const handleLogout = async () => {
-    try {
-      await signOut()
-      toast({
-        title: "Logged out successfully",
-        description: "You have been logged out of your account.",
-      })
-    } catch (error) {
-      console.error("Logout error:", error)
-      toast({
-        title: "Logout failed",
-        description: "There was a problem logging out.",
-        variant: "destructive",
-      })
-    }
+    await logout()
 
     // Close mobile menu if open
     setIsMenuOpen(false)
@@ -84,22 +70,27 @@ export default function Header() {
         </nav>
 
         <div className="flex items-center gap-4">
-          {isLoaded && isSignedIn ? (
+          {isAuthenticated ? (
             <>
-              {/* <Link href="/notifications" className="relative">
+              <Link href="/notifications" className="relative">
                 <Bell className="h-5 w-5" />
                 {unreadCount > 0 && (
                   <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-4 w-4 flex items-center justify-center">
                     {unreadCount}
                   </span>
                 )}
-              </Link> */}
+              </Link>
               <div className="hidden md:flex items-center gap-4">
                 <Link href="/profile">
                   <Button variant="ghost" size="sm">
                     Profile
                   </Button>
                 </Link>
+                {user?.userType === "Buyer" && (
+                  <Link href="/post-job">
+                    <Button size="sm">Post a Job</Button>
+                  </Link>
+                )}
                 <Button variant="outline" size="sm" onClick={handleLogout}>
                   Log out
                 </Button>
@@ -145,23 +136,20 @@ export default function Header() {
               </Link>
             ))}
 
-            {isLoaded && isSignedIn ? (
+            {isAuthenticated ? (
               <>
                 <Link href="/profile" onClick={closeMenu}>
                   <Button variant="ghost" className="w-full justify-start" size="sm">
                     Profile
                   </Button>
                 </Link>
-                <Link href="/notifications" onClick={closeMenu}>
-                  {/* <Button variant="ghost" className="w-full justify-start" size="sm">
-                    Notifications
-                    {unreadCount > 0 && (
-                      <span className="ml-2 bg-red-500 text-white text-xs rounded-full h-4 w-4 flex items-center justify-center">
-                        {unreadCount}
-                      </span>
-                    )}
-                  </Button> */}
-                </Link>
+                {user?.userType === "Buyer" && (
+                  <Link href="/post-job" onClick={closeMenu}>
+                    <Button className="w-full" size="sm">
+                      Post a Job
+                    </Button>
+                  </Link>
+                )}
                 <Button variant="outline" size="sm" onClick={handleLogout} className="w-full">
                   Log out
                 </Button>

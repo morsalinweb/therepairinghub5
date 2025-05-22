@@ -1,26 +1,25 @@
 import mongoose from "mongoose"
 
-// Define the Message schema
-const MessageSchema = new mongoose.Schema(
+const messageSchema = new mongoose.Schema(
   {
     job: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Job",
-      required: [true, "Job is required"],
+      required: true,
     },
     sender: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: [true, "Sender is required"],
+      required: true,
     },
     recipient: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: [true, "Recipient is required"],
+      required: true,
     },
     message: {
       type: String,
-      required: [true, "Message content is required"],
+      required: true,
     },
     read: {
       type: Boolean,
@@ -32,14 +31,10 @@ const MessageSchema = new mongoose.Schema(
   },
 )
 
-// Create indexes for better performance
-MessageSchema.index({ job: 1 })
-MessageSchema.index({ sender: 1 })
-MessageSchema.index({ recipient: 1 })
-MessageSchema.index({ createdAt: 1 })
-MessageSchema.index({ job: 1, sender: 1, recipient: 1 })
+// Create a compound index for conversations
+messageSchema.index({ job: 1, sender: 1, recipient: 1 })
 
-// Use mongoose.models to check if the model exists already
-const Message = mongoose.models.Message || mongoose.model("Message", MessageSchema)
+// Export the model
+const Message = mongoose.models.Message || mongoose.model("Message", messageSchema)
 
 export default Message

@@ -67,31 +67,7 @@ export async function GET(req) {
       hasSubmittedQuote = !!quote
     }
 
-    // Admin can always view messages
-    const isAdmin = authResult.user.userType === "Admin"
-
-    // Allow access if user is job poster, provider, has submitted a quote, or is admin
-    if (!isJobPoster && !isProvider && !hasSubmittedQuote && !isAdmin) {
-      console.log("Access denied to messages. User roles:", {
-        isJobPoster,
-        isProvider,
-        hasSubmittedQuote,
-        isAdmin,
-        userId: authResult.user._id,
-        jobPosterId: job.postedBy,
-        hiredProviderId: job.hiredProvider,
-      })
-
-      // For service providers, allow them to view the job without messages initially
-      if (authResult.user.userType === "Seller") {
-        return NextResponse.json({
-          success: true,
-          count: 0,
-          messages: [],
-          message: "Submit a quote to start messaging with the job poster",
-        })
-      }
-
+    if (!isJobPoster && !isProvider && !hasSubmittedQuote && authResult.user.userType !== "Admin") {
       return NextResponse.json(
         { success: false, message: "You are not authorized to view these messages" },
         { status: 403 },
@@ -307,7 +283,6 @@ async function updateConversation(userId, withUserId, jobId, messageId, incremen
         lastMessage: new mongoose.Types.ObjectId(messageId),
         unreadCount: incrementUnread ? 1 : 0,
         updatedAt: new Date(),
-        messages: [new mongoose.Types.ObjectId(messageId)], // Store messages directly in the conversation
       })
     }
 

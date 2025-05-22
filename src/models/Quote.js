@@ -1,17 +1,16 @@
 import mongoose from "mongoose"
 
-// Check if the model is already registered
 const QuoteSchema = new mongoose.Schema(
   {
     job: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Job",
-      required: [true, "Job is required"],
+      required: true,
     },
     provider: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: [true, "Provider is required"],
+      required: true,
     },
     price: {
       type: Number,
@@ -20,6 +19,7 @@ const QuoteSchema = new mongoose.Schema(
     message: {
       type: String,
       required: [true, "Please add a message"],
+      maxlength: [500, "Message cannot be more than 500 characters"],
     },
     image: {
       type: String,
@@ -30,19 +30,18 @@ const QuoteSchema = new mongoose.Schema(
       enum: ["pending", "accepted", "rejected"],
       default: "pending",
     },
+    createdAt: {
+      type: Date,
+      default: Date.now,
+    },
+    updatedAt: {
+      type: Date,
+      default: Date.now,
+    },
   },
   {
     timestamps: true,
   },
 )
 
-// Create indexes for better performance
-QuoteSchema.index({ job: 1, provider: 1 }, { unique: true })
-QuoteSchema.index({ job: 1 })
-QuoteSchema.index({ provider: 1 })
-QuoteSchema.index({ status: 1 })
-
-// Use mongoose.models to check if the model exists already
-const Quote = mongoose.models.Quote || mongoose.model("Quote", QuoteSchema)
-
-export default Quote
+export default mongoose.models.Quote || mongoose.model("Quote", QuoteSchema)

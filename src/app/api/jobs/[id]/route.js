@@ -1,3 +1,4 @@
+// api/jobs/id/route.js
 import { NextResponse } from "next/server"
 import connectToDatabase from "../../../../lib/db"
 import Job from "../../../../models/Job"

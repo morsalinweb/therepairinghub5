@@ -16,7 +16,7 @@ export const verifyCSRFToken = (token, storedToken) => {
 // Security headers for API routes
 export const securityHeaders = {
   "Content-Security-Policy":
-    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:;",
+    "default-src 'self'; connect-src 'self' ws: wss:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:;",
   "X-XSS-Protection": "1; mode=block",
   "X-Frame-Options": "DENY",
   "X-Content-Type-Options": "nosniff",
@@ -52,14 +52,4 @@ export const validateRequest = (req, schema) => {
   // In a real app, this would use a validation library like Joi or Zod
   // For the demo, we'll just return true
   return true
-}
-
-
-export default {
-  generateCSRFToken,
-  verifyCSRFToken,
-  securityHeaders,
-  rateLimit,
-  sanitizeInput,
-  validateRequest,
 }

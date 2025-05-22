@@ -33,127 +33,77 @@ function initializeWebSocketServer(server) {
     const cookies = cookie.parse(request.headers.cookie || "")
     const token = cookies.token
 
-    // Store temporary connection
-    const tempId = Date.now().toString()
-    clients.set(tempId, ws)
-    ws.tempId = tempId
+    // Authenticate user
+    if (!token) {
+      ws.close(1008, "Authentication failed - no token")
+      return
+    }
 
-    // Handle incoming messages
-    ws.on("message", (message) => {
-      try {
-        const data = JSON.parse(message.toString())
-        console.log(`Received message:`, data)
+    try {
+      // Verify JWT token
+      const decoded = jwt.verify(token, process.env.JWT_SECRET)
+      const userId = decoded.id
 
-        // Handle authentication
-        if (data.type === "auth") {
-          const userId = data.userId
+      // Store client connection with userId
+      clients.set(userId.toString(), ws)
+      ws.userId = userId.toString()
 
-          if (userId) {
-            // Remove temporary connection
-            clients.delete(ws.tempId)
+      console.log(`WebSocket client connected: ${userId}`)
 
-            // Store authenticated connection
-            clients.set(userId.toString(), ws)
-            ws.userId = userId.toString()
+      // Handle incoming messages
+      ws.on("message", (message) => {
+        try {
+          const data = JSON.parse(message.toString())
+          console.log(`Received message from ${userId}:`, data)
 
-            console.log(`WebSocket client authenticated: ${userId}`)
-
-            // Send confirmation
-            ws.send(
-              JSON.stringify({
-                type: "auth_success",
-                userId: userId.toString(),
-              }),
-            )
-          }
-        }
-        // Handle JWT authentication
-        else if (data.type === "auth_token" && token) {
-          try {
-            // Verify JWT token
-            const decoded = jwt.verify(token, process.env.JWT_SECRET)
-            const userId = decoded.id
-
-            // Remove temporary connection
-            clients.delete(ws.tempId)
-
-            // Store authenticated connection
-            clients.set(userId.toString(), ws)
-            ws.userId = userId.toString()
-
-            console.log(`WebSocket client authenticated with JWT: ${userId}`)
+          // Handle different message types
+          if (data.type === "join_job") {
+            // Join a job room for updates
+            if (!jobSubscriptions.has(data.jobId)) {
+              jobSubscriptions.set(data.jobId, new Set())
+            }
+            jobSubscriptions.get(data.jobId).add(userId.toString())
+            console.log(`User ${userId} joined job room: ${data.jobId}`)
 
             // Send confirmation
             ws.send(
               JSON.stringify({
-                type: "auth_success",
-                userId: userId.toString(),
-              }),
-            )
-          } catch (error) {
-            console.error("WebSocket JWT authentication error:", error)
-            ws.send(
-              JSON.stringify({
-                type: "auth_error",
-                message: "Invalid token",
+                type: "joined_job",
+                jobId: data.jobId,
               }),
             )
           }
+        } catch (error) {
+          console.error("Error processing WebSocket message:", error)
         }
-        // Handle job room subscription
-        else if (data.type === "join_job") {
-          if (!jobSubscriptions.has(data.jobId)) {
-            jobSubscriptions.set(data.jobId, new Set())
-          }
+      })
 
-          // Add user to job room
-          if (ws.userId) {
-            jobSubscriptions.get(data.jobId).add(ws.userId)
-            console.log(`User ${ws.userId} joined job room: ${data.jobId}`)
-          } else {
-            jobSubscriptions.get(data.jobId).add(ws.tempId)
-            console.log(`Temporary user ${ws.tempId} joined job room: ${data.jobId}`)
-          }
-
-          // Send confirmation
-          ws.send(
-            JSON.stringify({
-              type: "joined_job",
-              jobId: data.jobId,
-            }),
-          )
-        }
-      } catch (error) {
-        console.error("Error processing WebSocket message:", error)
-      }
-    })
-
-    // Handle disconnection
-    ws.on("close", () => {
-      const userId = ws.userId || ws.tempId
-
-      if (userId) {
-        clients.delete(userId)
+      // Handle disconnection
+      ws.on("close", () => {
+        clients.delete(userId.toString())
 
         // Remove from job subscriptions
         for (const [jobId, subscribers] of jobSubscriptions.entries()) {
-          subscribers.delete(userId)
+          subscribers.delete(userId.toString())
           if (subscribers.size === 0) {
             jobSubscriptions.delete(jobId)
           }
         }
 
         console.log(`WebSocket client disconnected: ${userId}`)
-      }
-    })
+      })
 
-    // Send initial connection confirmation
-    ws.send(
-      JSON.stringify({
-        type: "connected",
-        message: "Connected to WebSocket server",
-      }),
-    )
+      // Send initial connection confirmation
+      ws.send(
+        JSON.stringify({
+          type: "connected",
+          userId: userId.toString(),
+        }),
+      )
+    } catch (error) {
+      console.error("WebSocket authentication error:", error)
+      ws.close(1008, "Authentication failed - invalid token")
+    }
   })
 
   console.log("WebSocket server initialized")

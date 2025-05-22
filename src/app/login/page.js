@@ -1,8 +1,7 @@
 "use client"
-
 import { useState } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useForm } from "react-hook-form"
@@ -10,8 +9,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { useToast } from "@/hooks/use-toast"
-import { useSignIn } from "@clerk/nextjs"
+import { useAuth } from "@/contexts/auth-context"
+import { Loader2 } from "lucide-react"
 
 // Form validation schema
 const formSchema = z.object({
@@ -20,9 +19,10 @@ const formSchema = z.object({
 })
 
 export default function Login() {
+  const { login, loading } = useAuth()
   const router = useRouter()
-  const { toast } = useToast()
-  const { isLoaded, signIn, setActive } = useSignIn()
+  const searchParams = useSearchParams()
+  const redirect = searchParams.get("redirect") || "/profile"
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const form = useForm({
@@ -34,40 +34,14 @@ export default function Login() {
   })
 
   const onSubmit = async (data) => {
-    if (!isLoaded) return
-
     setIsSubmitting(true)
-
     try {
-      const result = await signIn.create({
-        identifier: data.email,
-        password: data.password,
-      })
-
-      if (result.status === "complete") {
-        await setActive({ session: result.createdSessionId })
-
-        toast({
-          title: "Login successful",
-          description: "Welcome back!",
-        })
-
-        // Force a hard navigation to profile page to ensure proper state refresh
-        window.location.href = "/profile"
-      } else {
-        toast({
-          variant: "destructive",
-          title: "Login failed",
-          description: "Invalid email or password",
-        })
+      const success = await login(data)
+      if (success) {
+        router.push(redirect)
       }
     } catch (error) {
       console.error("Login error:", error)
-      toast({
-        variant: "destructive",
-        title: "Login failed",
-        description: error.message || "An error occurred during login",
-      })
     } finally {
       setIsSubmitting(false)
     }
@@ -105,7 +79,14 @@ export default function Login() {
           </CardContent>
           <CardFooter className="flex flex-col space-y-4">
             <Button type="submit" className="w-full" disabled={isSubmitting}>
-              {isSubmitting ? "Signing in..." : "Sign in"}
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Signing in...
+                </>
+              ) : (
+                "Sign in"
+              )}
             </Button>
             <p className="text-center text-sm text-gray-500">
               Don't have an account?{" "}

@@ -1,64 +1,59 @@
 import { NextResponse } from "next/server"
-import connectToDatabase from "../../../../lib/db"
-import { handleProtectedRoute } from "../../../../lib/auth"
-import { auth } from "@clerk/nextjs/server"
-import User from "../../../../models/User"
+import connectToDatabase from "@/lib/db"
+import User from "@/models/User"
+import { verifyToken } from "@/lib/auth"
 
 export async function GET(req) {
   try {
     await connectToDatabase()
 
-    // Try to get user from Clerk first
-    const { userId } = auth()
+    // Get token from Authorization header
+    const authHeader = req.headers.get("Authorization")
+    const headerToken = authHeader ? authHeader.split(" ")[1] : null
 
-    if (userId) {
-      // Find user in our database
-      const user = await User.findOne({ clerkId: userId }).select("-password")
+    // Get token from cookie
+    const cookieToken = req.cookies.get("token")?.value
 
-      if (user) {
-        return NextResponse.json({
-          success: true,
-          user: {
-            _id: user._id,
-            email: user.email,
-            name: user.name,
-            phone: user.phone,
-            userType: user.userType,
-            bio: user.bio,
-            avatar: user.avatar,
-            services: user.services,
-            status: user.status,
-            createdAt: user.createdAt,
-            clerkId: user.clerkId,
-          },
-        })
-      }
+    // Use token from header or cookie
+    const token = headerToken || cookieToken
+
+    if (!token) {
+      console.log("No token found in request")
+      return NextResponse.json({ success: false, message: "Not authenticated" }, { status: 401 })
     }
 
-    // Fallback to JWT token authentication
-    const authResult = await handleProtectedRoute(req)
-    if (!authResult.success) {
-      return NextResponse.json({ success: false, message: authResult.message }, { status: 401 })
+    // Verify token
+    const decoded = verifyToken(token)
+    if (!decoded) {
+      console.log("Invalid token")
+      return NextResponse.json({ success: false, message: "Invalid token" }, { status: 401 })
+    }
+
+    // Find user by ID
+    const user = await User.findById(decoded.userId)
+    if (!user) {
+      console.log("User not found for token")
+      return NextResponse.json({ success: false, message: "User not found" }, { status: 404 })
     }
 
     // Return user data
     return NextResponse.json({
       success: true,
       user: {
-        _id: authResult.user._id,
-        email: authResult.user.email,
-        name: authResult.user.name,
-        phone: authResult.user.phone,
-        userType: authResult.user.userType,
-        bio: authResult.user.bio,
-        avatar: authResult.user.avatar,
-        services: authResult.user.services,
-        status: authResult.user.status,
-        createdAt: authResult.user.createdAt,
+        _id: user._id,
+        email: user.email,
+        name: user.name,
+        phone: user.phone,
+        userType: user.userType,
+        bio: user.bio,
+        avatar: user.avatar,
+        services: user.services,
+        status: user.status,
+        createdAt: user.createdAt,
       },
     })
   } catch (error) {
-    console.error("Get user error:", error)
+    console.error("Auth me error:", error)
     return NextResponse.json({ success: false, message: error.message }, { status: 500 })
   }
 }

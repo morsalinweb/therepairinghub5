@@ -1,20 +1,23 @@
 import { NextResponse } from "next/server"
-import { clerkClient } from "@clerk/clerk-sdk-node"
 import connectToDatabase from "../../../../lib/db"
 import User from "../../../../models/User"
-import DeletedUser from "../../../../models/DeletedUser"
-import { auth } from "@clerk/nextjs/server"
+import { handleProtectedRoute } from "../../../../lib/auth"
 
 // Get user by ID
 export async function GET(req, { params }) {
   try {
     await connectToDatabase()
 
-    const { id } = params
+    // Check authentication
+    const authResult = await handleProtectedRoute(req)
+    if (!authResult.success) {
+      return authResult
+    }
 
-    // Find user in our database
-    const user = await User.findOne({ clerkId: id }).select("-password")
+    const userId = params.id
 
+    // Find user
+    const user = await User.findById(userId).select("-password")
     if (!user) {
       return NextResponse.json({ success: false, message: "User not found" }, { status: 404 })
     }
@@ -31,13 +34,10 @@ export async function GET(req, { params }) {
         services: user.services,
         status: user.status,
         createdAt: user.createdAt,
-        clerkId: user.clerkId,
-        phone: user.phone,
-        paypalEmail: user.paypalEmail,
       },
     })
   } catch (error) {
-    console.error("Error fetching user:", error)
+    console.error("Get user error:", error)
     return NextResponse.json({ success: false, message: error.message }, { status: 500 })
   }
 }
@@ -46,31 +46,36 @@ export async function GET(req, { params }) {
 export async function PUT(req, { params }) {
   try {
     await connectToDatabase()
-    const { userId } = auth()
 
-    if (!userId) {
-      return NextResponse.json({ success: false, message: "Not authenticated" }, { status: 401 })
+    // Check authentication
+    const authResult = await handleProtectedRoute(req)
+    if (!authResult.success) {
+      return authResult
     }
 
-    const { id } = params
-    const data = await req.json()
+    const userId = params.id
+    const { name, bio, avatar, services, phone } = await req.json()
 
-    // Security check - users can only update their own profile unless they're an admin
-    const requestingUser = await User.findOne({ clerkId: userId })
-    if (id !== userId && requestingUser.userType !== "Admin") {
+    // Check if user is updating their own profile or is an admin
+    if (authResult.user._id.toString() !== userId && authResult.user.userType !== "Admin") {
       return NextResponse.json({ success: false, message: "Not authorized to update this user" }, { status: 403 })
     }
 
-    // Find and update user
-    const user = await User.findOneAndUpdate(
-      { clerkId: id },
-      { $set: data },
-      { new: true, runValidators: true },
-    ).select("-password")
-
+    // Find user
+    const user = await User.findById(userId)
     if (!user) {
       return NextResponse.json({ success: false, message: "User not found" }, { status: 404 })
     }
+
+    // Update user fields
+    if (name) user.name = name
+    if (bio) user.bio = bio
+    if (avatar) user.avatar = avatar
+    if (services) user.services = services
+    if (phone) user.phone = phone
+
+    // Save updated user
+    await user.save()
 
     return NextResponse.json({
       success: true,
@@ -84,12 +89,10 @@ export async function PUT(req, { params }) {
         services: user.services,
         phone: user.phone,
         status: user.status,
-        clerkId: user.clerkId,
-        paypalEmail: user.paypalEmail,
       },
     })
   } catch (error) {
-    console.error("Error updating user:", error)
+    console.error("Update user error:", error)
     return NextResponse.json({ success: false, message: error.message }, { status: 500 })
   }
 }
@@ -98,56 +101,32 @@ export async function PUT(req, { params }) {
 export async function DELETE(req, { params }) {
   try {
     await connectToDatabase()
-    const { userId } = auth()
 
-    if (!userId) {
-      return NextResponse.json({ success: false, message: "Not authenticated" }, { status: 401 })
+    // Check authentication
+    const authResult = await handleProtectedRoute(req)
+    if (!authResult.success) {
+      return authResult
     }
 
-    const { id } = params
+    const userId = params.id
 
-    // Security check - users can only delete their own account unless they're an admin
-    const requestingUser = await User.findOne({ clerkId: userId })
-    if (id !== userId && requestingUser.userType !== "Admin") {
+    // Check if user is deleting their own account or is an admin
+    if (authResult.user._id.toString() !== userId && authResult.user.userType !== "Admin") {
       return NextResponse.json({ success: false, message: "Not authorized to delete this user" }, { status: 403 })
     }
 
-    // Find user
-    const user = await User.findOne({ clerkId: id })
-
+    // Find and delete user
+    const user = await User.findByIdAndDelete(userId)
     if (!user) {
       return NextResponse.json({ success: false, message: "User not found" }, { status: 404 })
     }
 
-    // Create a record in DeletedUser collection
-    await DeletedUser.create({
-      name: user.name,
-      email: user.email,
-      userType: user.userType,
-      phone: user.phone,
-      clerkId: user.clerkId,
-      deletedAt: new Date(),
-      metadata: {
-        address: user.address,
-        bio: user.bio,
-        skills: user.skills,
-      },
+    return NextResponse.json({
+      success: true,
+      message: "User deleted successfully",
     })
-
-    // Delete user from our database
-    await User.findByIdAndDelete(user._id)
-
-    // Delete user from Clerk
-    try {
-      await clerkClient.users.deleteUser(id)
-    } catch (clerkError) {
-      console.error("Error deleting user from Clerk:", clerkError)
-      // Continue with the process even if Clerk deletion fails
-    }
-
-    return NextResponse.json({ success: true, message: "User deleted successfully" })
   } catch (error) {
-    console.error("Error deleting user:", error)
+    console.error("Delete user error:", error)
     return NextResponse.json({ success: false, message: error.message }, { status: 500 })
   }
 }

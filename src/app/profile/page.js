@@ -10,26 +10,18 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Loader2, Save, UserIcon, Briefcase, CreditCard } from "lucide-react"
+import { Loader2, Save, UserIcon } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
-import { userAPI, jobAPI } from "@/lib/api"
-import { useUser, useClerk } from "@clerk/nextjs"
-import FinancialDashboard from "@/components/financial-dashboard"
-import JobListingPreview from "@/components/job-listing-preview"
+import { useAuth } from "@/contexts/auth-context"
+import { userAPI } from "@/lib/api"
 
 export default function ProfilePage() {
-  const { user, isLoaded, isSignedIn } = useUser()
-  const { signOut } = useClerk()
+  const { user, loading, updateUserData } = useAuth()
   const router = useRouter()
   const { toast } = useToast()
   const [isUpdating, setIsUpdating] = useState(false)
   const [avatarPreview, setAvatarPreview] = useState("")
   const [avatarFile, setAvatarFile] = useState(null)
-  const [dbUser, setDbUser] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [activeJobs, setActiveJobs] = useState([])
-  const [completedJobs, setCompletedJobs] = useState([])
-  const [jobsLoading, setJobsLoading] = useState(true)
 
   const {
     register,
@@ -38,71 +30,27 @@ export default function ProfilePage() {
     formState: { errors },
   } = useForm()
 
-  // Fetch user data from our database
   useEffect(() => {
-    const fetchUserData = async () => {
-      if (isLoaded && isSignedIn && user?.id) {
-        try {
-          const response = await userAPI.getUserByClerkId(user.id)
-          if (response.success) {
-            setDbUser(response.user)
-
-            // Set form values
-            reset({
-              name: response.user.name || user.fullName || "",
-              email: response.user.email || user.primaryEmailAddress?.emailAddress || "",
-              phone: response.user.phone || user.phoneNumbers?.[0]?.phoneNumber || "",
-              address: response.user.address || "",
-              bio: response.user.bio || "",
-              skills: response.user.skills ? response.user.skills.join(", ") : "",
-              paypalEmail: response.user.paypalEmail || "",
-            })
-
-            if (response.user.avatar) {
-              setAvatarPreview(response.user.avatar)
-            } else if (user.imageUrl) {
-              setAvatarPreview(user.imageUrl)
-            }
-          }
-        } catch (error) {
-          console.error("Error fetching user data:", error)
-          toast({
-            title: "Error",
-            description: "Failed to load user profile data",
-            variant: "destructive",
-          })
-        } finally {
-          setLoading(false)
-        }
-      } else if (isLoaded && !isSignedIn) {
-        router.push("/login")
-      }
+    if (!loading && !user) {
+      router.push("/login")
     }
 
-    fetchUserData()
-  }, [isLoaded, isSignedIn, user, reset, router, toast])
+    if (user) {
+      reset({
+        name: user.name || "",
+        email: user.email || "",
+        phone: user.phone || "",
+        address: user.address || "",
+        bio: user.bio || "",
+        skills: user.skills ? user.skills.join(", ") : "",
+        paypalEmail: user.paypalEmail || "",
+      })
 
-  // Fetch user's jobs
-  useEffect(() => {
-    const fetchUserJobs = async () => {
-      if (dbUser?._id) {
-        try {
-          setJobsLoading(true)
-          const response = await jobAPI.getUserJobs(dbUser._id)
-          if (response.success) {
-            setActiveJobs(response.jobs.filter((job) => job.status !== "Completed"))
-            setCompletedJobs(response.jobs.filter((job) => job.status === "Completed"))
-          }
-        } catch (error) {
-          console.error("Error fetching user jobs:", error)
-        } finally {
-          setJobsLoading(false)
-        }
+      if (user.avatar) {
+        setAvatarPreview(user.avatar)
       }
     }
-
-    fetchUserJobs()
-  }, [dbUser])
+  }, [user, loading, reset, router])
 
   const handleAvatarChange = (e) => {
     const file = e.target.files[0]
@@ -134,8 +82,8 @@ export default function ProfilePage() {
         // For this demo, we'll skip this step
       }
 
-      // Update user profile in our database
-      const result = await userAPI.updateUserByClerkId(user.id, formattedData)
+      // Update user profile
+      const result = await userAPI.updateProfile(formattedData)
 
       if (result.success) {
         toast({
@@ -143,8 +91,8 @@ export default function ProfilePage() {
           description: "Your profile has been updated successfully",
         })
 
-        // Update local state
-        setDbUser(result.user)
+        // Update user data in context
+        updateUserData(result.user)
       } else {
         toast({
           title: "Update failed",
@@ -164,21 +112,7 @@ export default function ProfilePage() {
     }
   }
 
-  const handleLogout = async () => {
-    try {
-      await signOut()
-      router.push("/")
-    } catch (error) {
-      console.error("Logout error:", error)
-      toast({
-        title: "Logout failed",
-        description: "There was a problem logging out",
-        variant: "destructive",
-      })
-    }
-  }
-
-  if (loading || !isLoaded) {
+  if (loading) {
     return (
       <div className="flex justify-center items-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
@@ -188,31 +122,17 @@ export default function ProfilePage() {
 
   return (
     <div className="container mx-auto py-8">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold">My Profile</h1>
-        <Button variant="outline" onClick={handleLogout}>
-          Log out
-        </Button>
-      </div>
+      <h1 className="text-3xl font-bold mb-6">My Profile</h1>
 
       <Tabs defaultValue="profile" className="w-full">
         <TabsList className="mb-6">
-          <TabsTrigger value="profile" className="flex items-center gap-2">
-            <UserIcon className="h-4 w-4" />
-            Profile Information
-          </TabsTrigger>
-          <TabsTrigger value="jobs" className="flex items-center gap-2">
-            <Briefcase className="h-4 w-4" />
-            My Jobs
-          </TabsTrigger>
-          <TabsTrigger value="finance" className="flex items-center gap-2">
-            <CreditCard className="h-4 w-4" />
-            Financial Dashboard
-          </TabsTrigger>
+          <TabsTrigger value="profile">Profile Information</TabsTrigger>
+          <TabsTrigger value="account">Account Settings</TabsTrigger>
+          {user?.userType === "Seller" && <TabsTrigger value="payment">Payment Settings</TabsTrigger>}
         </TabsList>
 
-        <TabsContent value="profile">
-          <form onSubmit={handleSubmit(onSubmit)}>
+        <form onSubmit={handleSubmit(onSubmit)}>
+          <TabsContent value="profile">
             <Card>
               <CardHeader>
                 <CardTitle>Profile Information</CardTitle>
@@ -221,7 +141,7 @@ export default function ProfilePage() {
               <CardContent className="space-y-6">
                 <div className="flex flex-col items-center space-y-4 sm:flex-row sm:space-y-0 sm:space-x-4">
                   <Avatar className="h-24 w-24">
-                    <AvatarImage src={avatarPreview || "/placeholder.svg?height=96&width=96"} alt={dbUser?.name} />
+                    <AvatarImage src={avatarPreview || "/placeholder.svg?height=96&width=96"} alt={user?.name} />
                     <AvatarFallback>
                       <UserIcon className="h-12 w-12" />
                     </AvatarFallback>
@@ -248,7 +168,20 @@ export default function ProfilePage() {
 
                   <div className="space-y-2">
                     <Label htmlFor="email">Email Address</Label>
-                    <Input id="email" type="email" {...register("email")} placeholder="Your email address" disabled />
+                    <Input
+                      id="email"
+                      type="email"
+                      {...register("email", {
+                        required: "Email is required",
+                        pattern: {
+                          value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
+                          message: "Invalid email address",
+                        },
+                      })}
+                      placeholder="Your email address"
+                      disabled
+                    />
+                    {errors.email && <p className="text-sm text-red-500">{errors.email.message}</p>}
                   </div>
 
                   <div className="space-y-2">
@@ -272,29 +205,10 @@ export default function ProfilePage() {
                   />
                 </div>
 
-                {dbUser?.userType === "Seller" && (
+                {user?.userType === "Seller" && (
                   <div className="space-y-2">
                     <Label htmlFor="skills">Skills (comma separated)</Label>
                     <Input id="skills" {...register("skills")} placeholder="e.g. Plumbing, Electrical, Carpentry" />
-                  </div>
-                )}
-
-                {dbUser?.userType === "Seller" && (
-                  <div className="space-y-2">
-                    <Label htmlFor="paypal-email">PayPal Email</Label>
-                    <Input
-                      id="paypal-email"
-                      type="email"
-                      {...register("paypalEmail", {
-                        pattern: {
-                          value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
-                          message: "Invalid email address",
-                        },
-                      })}
-                      placeholder="Your PayPal email address"
-                    />
-                    {errors.paypalEmail && <p className="text-sm text-red-500">{errors.paypalEmail.message}</p>}
-                    <p className="text-sm text-muted-foreground mt-1">This email will be used for PayPal withdrawals</p>
                   </div>
                 )}
               </CardContent>
@@ -314,73 +228,107 @@ export default function ProfilePage() {
                 </Button>
               </CardFooter>
             </Card>
-          </form>
-        </TabsContent>
+          </TabsContent>
 
-        <TabsContent value="jobs">
-          <Card>
-            <CardHeader>
-              <CardTitle>My Jobs</CardTitle>
-              <CardDescription>Manage your active and completed jobs</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {jobsLoading ? (
-                <div className="flex justify-center py-8">
-                  <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+          <TabsContent value="account">
+            <Card>
+              <CardHeader>
+                <CardTitle>Account Settings</CardTitle>
+                <CardDescription>Manage your account preferences and security</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-2">
+                  <Label htmlFor="current-password">Current Password</Label>
+                  <Input
+                    id="current-password"
+                    type="password"
+                    {...register("currentPassword")}
+                    placeholder="Enter your current password"
+                  />
                 </div>
-              ) : (
-                <Tabs defaultValue="active">
-                  <TabsList className="mb-4">
-                    <TabsTrigger value="active">Active Jobs ({activeJobs.length})</TabsTrigger>
-                    <TabsTrigger value="completed">Completed Jobs ({completedJobs.length})</TabsTrigger>
-                  </TabsList>
 
-                  <TabsContent value="active">
-                    {activeJobs.length > 0 ? (
-                      <div className="space-y-4">
-                        {activeJobs.map((job) => (
-                          <JobListingPreview key={job._id} job={job} />
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-center py-8 text-muted-foreground">
-                        You don't have any active jobs.
-                        {dbUser?.userType === "Buyer" && (
-                          <div className="mt-4">
-                            <Button onClick={() => router.push("/post-job")}>Post a New Job</Button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </TabsContent>
+                <div className="space-y-2">
+                  <Label htmlFor="new-password">New Password</Label>
+                  <Input
+                    id="new-password"
+                    type="password"
+                    {...register("newPassword")}
+                    placeholder="Enter a new password"
+                  />
+                </div>
 
-                  <TabsContent value="completed">
-                    {completedJobs.length > 0 ? (
-                      <div className="space-y-4">
-                        {completedJobs.map((job) => (
-                          <JobListingPreview key={job._id} job={job} />
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-center py-8 text-muted-foreground">
-                        You don't have any completed jobs yet.
-                      </div>
-                    )}
-                  </TabsContent>
-                </Tabs>
-              )}
-            </CardContent>
-            {dbUser?.userType === "Buyer" && (
-              <CardFooter>
-                <Button onClick={() => router.push("/post-job")}>Post a New Job</Button>
+                <div className="space-y-2">
+                  <Label htmlFor="confirm-password">Confirm New Password</Label>
+                  <Input
+                    id="confirm-password"
+                    type="password"
+                    {...register("confirmPassword")}
+                    placeholder="Confirm your new password"
+                  />
+                </div>
+              </CardContent>
+              <CardFooter className="flex justify-end">
+                <Button type="submit" disabled={isUpdating}>
+                  {isUpdating ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="mr-2 h-4 w-4" />
+                      Save Changes
+                    </>
+                  )}
+                </Button>
               </CardFooter>
-            )}
-          </Card>
-        </TabsContent>
+            </Card>
+          </TabsContent>
 
-        <TabsContent value="finance">
-          <FinancialDashboard userId={dbUser?._id} userType={dbUser?.userType} />
-        </TabsContent>
+          {user?.userType === "Seller" && (
+            <TabsContent value="payment">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Payment Settings</CardTitle>
+                  <CardDescription>Manage your payment preferences and withdrawal methods</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="space-y-2">
+                    <Label htmlFor="paypal-email">PayPal Email</Label>
+                    <Input
+                      id="paypal-email"
+                      type="email"
+                      {...register("paypalEmail", {
+                        pattern: {
+                          value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
+                          message: "Invalid email address",
+                        },
+                      })}
+                      placeholder="Your PayPal email address"
+                    />
+                    {errors.paypalEmail && <p className="text-sm text-red-500">{errors.paypalEmail.message}</p>}
+                    <p className="text-sm text-muted-foreground mt-1">This email will be used for PayPal withdrawals</p>
+                  </div>
+                </CardContent>
+                <CardFooter className="flex justify-end">
+                  <Button type="submit" disabled={isUpdating}>
+                    {isUpdating ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      <>
+                        <Save className="mr-2 h-4 w-4" />
+                        Save Changes
+                      </>
+                    )}
+                  </Button>
+                </CardFooter>
+              </Card>
+            </TabsContent>
+          )}
+        </form>
       </Tabs>
     </div>
   )

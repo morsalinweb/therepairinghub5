@@ -1,10 +1,9 @@
 "use client"
 
 import { createContext, useContext, useState, useEffect } from "react"
-import { useRouter, usePathname } from "next/navigation"
+import { useRouter } from "next/navigation"
 import { authAPI } from "@/lib/api"
 import { useToast } from "@/hooks/use-toast"
-import { useClerk, useUser } from "@clerk/nextjs"
 
 const AuthContext = createContext()
 
@@ -12,55 +11,27 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
   const router = useRouter()
-  const pathname = usePathname()
   const { toast } = useToast()
-  const { signOut } = useClerk()
-  const { isLoaded: clerkLoaded, isSignedIn, user: clerkUser } = useUser()
 
   // Check if user is logged in on initial load
   useEffect(() => {
     const checkAuthStatus = async () => {
       try {
-        // First check if user is signed in with Clerk
-        if (clerkLoaded) {
-          if (isSignedIn && clerkUser) {
-            console.log("User is signed in with Clerk, syncing with database...")
-            // Sync Clerk user with our database and get JWT token
-            const { success, user, token } = await authAPI.syncAuth()
+        // Check if token exists in localStorage
+        const token = localStorage.getItem("auth_token")
+        if (!token) {
+          console.log("No token in localStorage")
+          setLoading(false)
+          return
+        }
 
-            if (success && user) {
-              console.log("Sync successful, user:", user)
-              setUser(user)
-
-              // Store token in localStorage for API requests
-              if (token) {
-                localStorage.setItem("auth_token", token)
-              }
-
-              setLoading(false)
-              return
-            } else {
-              console.error("Sync failed")
-              // If sync fails but user is signed in with Clerk, try again after a delay
-              setTimeout(() => {
-                if (isSignedIn && clerkUser) {
-                  checkAuthStatus()
-                }
-              }, 2000)
-            }
-          } else {
-            console.log("Not signed in with Clerk, trying JWT fallback")
-            // Not signed in with Clerk, try JWT fallback
-            const { success, user } = await authAPI.getCurrentUser()
-            if (success && user) {
-              console.log("JWT auth successful, user:", user)
-              setUser(user)
-            } else {
-              console.log("JWT auth failed, not authenticated")
-              // Clear any stale tokens
-              localStorage.removeItem("auth_token")
-            }
-          }
+        const { success, user } = await authAPI.getCurrentUser()
+        if (success && user) {
+          console.log("User authenticated:", user)
+          setUser(user)
+        } else {
+          console.log("Authentication failed, clearing token")
+          localStorage.removeItem("auth_token")
         }
       } catch (error) {
         console.error("Auth check error:", error)
@@ -72,7 +43,7 @@ export const AuthProvider = ({ children }) => {
     }
 
     checkAuthStatus()
-  }, [clerkLoaded, isSignedIn, clerkUser])
+  }, [])
 
   // Register a new user
   const register = async (userData) => {
@@ -93,6 +64,13 @@ export const AuthProvider = ({ children }) => {
         })
         router.push("/profile")
         return true
+      } else {
+        toast({
+          title: "Registration failed",
+          description: "There was a problem creating your account.",
+          variant: "destructive",
+        })
+        return false
       }
     } catch (error) {
       console.error("Registration error:", error)
@@ -132,6 +110,14 @@ export const AuthProvider = ({ children }) => {
           router.push("/profile")
         }
         return true
+      } else {
+        toast({
+          title: "Login failed",
+          description: "Invalid email or password.",
+          variant: "destructive",
+        })
+        setLoading(false)
+        return false
       }
     } catch (error) {
       console.error("Login error:", error)
@@ -140,9 +126,8 @@ export const AuthProvider = ({ children }) => {
         description: error.response?.data?.message || "Invalid email or password.",
         variant: "destructive",
       })
-      return false
-    } finally {
       setLoading(false)
+      return false
     }
   }
 
@@ -150,12 +135,6 @@ export const AuthProvider = ({ children }) => {
   const logout = async () => {
     setLoading(true)
     try {
-      // Sign out from Clerk if using Clerk
-      if (isSignedIn) {
-        await signOut()
-      }
-
-      // Also sign out from our JWT system
       await authAPI.logout()
 
       // Remove token from localStorage
@@ -220,11 +199,6 @@ export const AuthProvider = ({ children }) => {
     try {
       const { success } = await authAPI.deleteAccount(userId)
       if (success) {
-        // Sign out from Clerk if using Clerk
-        if (isSignedIn) {
-          await signOut()
-        }
-
         // Remove token from localStorage
         localStorage.removeItem("auth_token")
 
