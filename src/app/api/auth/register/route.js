@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server"
-import bcrypt from "bcryptjs"
 import connectToDatabase from "@/lib/db"
 import User from "@/models/User"
 import { generateToken, setTokenCookie } from "@/lib/auth"
@@ -16,15 +15,11 @@ export async function POST(req) {
       return NextResponse.json({ success: false, message: "User already exists" }, { status: 400 })
     }
 
-    // Hash password
-    const salt = await bcrypt.genSalt(10)
-    const hashedPassword = await bcrypt.hash(password, salt)
-
-    // Create user
+    // Create user - let the pre('save') middleware handle password hashing
     const user = await User.create({
       name,
       email,
-      password: hashedPassword,
+      password, // Don't hash here, let the model do it
       userType,
       phone,
     })

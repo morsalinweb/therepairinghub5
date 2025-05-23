@@ -1,3 +1,4 @@
+// contexts/auth-context.js
 "use client"
 
 import { createContext, useContext, useState, useEffect } from "react"
@@ -14,35 +15,30 @@ export const AuthProvider = ({ children }) => {
   const { toast } = useToast()
 
   // Check if user is logged in on initial load
+  // In your auth context
   useEffect(() => {
-    const checkAuthStatus = async () => {
+    const checkAuth = async () => {
       try {
-        // Check if token exists in localStorage
-        const token = localStorage.getItem("auth_token")
-        if (!token) {
-          console.log("No token in localStorage")
-          setLoading(false)
-          return
-        }
+        // This should automatically include cookies
+        const response = await fetch('/api/auth/me', {
+          credentials: 'include'
+        })
 
-        const { success, user } = await authAPI.getCurrentUser()
-        if (success && user) {
-          console.log("User authenticated:", user)
-          setUser(user)
-        } else {
-          console.log("Authentication failed, clearing token")
-          localStorage.removeItem("auth_token")
+        if (response.ok) {
+          const data = await response.json()
+          if (data.success) {
+            setUser(data.user)
+            setIsAuthenticated(true)
+          }
         }
       } catch (error) {
-        console.error("Auth check error:", error)
-        // User is not logged in, that's okay
-        localStorage.removeItem("auth_token")
+        console.error('Auth check failed:', error)
       } finally {
         setLoading(false)
       }
     }
 
-    checkAuthStatus()
+    checkAuth()
   }, [])
 
   // Register a new user

@@ -1,3 +1,4 @@
+// jobs/id/page.js
 "use client"
 
 import { Label } from "@/components/ui/label"

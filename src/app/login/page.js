@@ -1,3 +1,5 @@
+// login/page.js
+
 "use client"
 import { useState } from "react"
 import Link from "next/link"
@@ -22,7 +24,7 @@ export default function Login() {
   const { login, loading } = useAuth()
   const router = useRouter()
   const searchParams = useSearchParams()
-  const redirect = searchParams.get("redirect") || "/profile"
+  const redirect = searchParams.get("redirect") || "/"
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const form = useForm({

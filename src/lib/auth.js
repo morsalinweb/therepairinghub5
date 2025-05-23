@@ -29,10 +29,12 @@ export const setTokenCookie = (res, token) => {
     sameSite: "strict",
     maxAge: 7 * 24 * 60 * 60, // 7 days
     path: "/",
-  })
+  });
 
-  res.headers.set("Set-Cookie", cookie)
-}
+  res.headers.set("Set-Cookie", cookie);
+};
+
+
 
 // Handle protected routes
 export async function handleProtectedRoute(req, allowedUserTypes = []) {

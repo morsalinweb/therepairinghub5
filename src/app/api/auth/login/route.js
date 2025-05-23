@@ -1,8 +1,9 @@
+// api/auth/login/route.js
 import { NextResponse } from "next/server"
 import bcrypt from "bcryptjs"
-import jwt from "jsonwebtoken"
 import connectToDatabase from "@/lib/db"
 import User from "@/models/User"
+import { generateToken, setTokenCookie } from "@/lib/auth"
 
 export async function POST(req) {
   try {
@@ -20,7 +21,9 @@ export async function POST(req) {
       )
     }
 
-    const user = await User.findOne({ email })
+    // const user = await User.findOne({ email }).select("+password")
+
+    const user = await User.findOne({ email }).select("+password");
 
     if (!user) {
       return NextResponse.json(
@@ -55,15 +58,13 @@ export async function POST(req) {
       )
     }
 
-    // Create JWT Token
-    const token = jwt.sign(
-      { id: user._id, email: user.email },
-      process.env.JWT_SECRET || "fallback_secret_do_not_use_in_production",
-      { expiresIn: "7d" },
-    )
+    // Generate JWT token using the same function as registration
+    const token = generateToken(user._id)
 
-    return NextResponse.json({
+    // Create response with same structure as registration
+    const response = NextResponse.json({
       success: true,
+      token,
       user: {
         _id: user._id,
         email: user.email,
@@ -76,8 +77,12 @@ export async function POST(req) {
         status: user.status,
         createdAt: user.createdAt,
       },
-      token: token,
     })
+
+    // Set token cookie - this is crucial for frontend authentication
+    setTokenCookie(response, token)
+
+    return response
   } catch (error) {
     console.error("LOGIN_ERROR", error)
     return NextResponse.json(
