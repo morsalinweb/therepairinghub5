@@ -1,3 +1,4 @@
+// api/auth/register/route.js
 import { NextResponse } from "next/server"
 import connectToDatabase from "@/lib/db"
 import User from "@/models/User"
@@ -7,7 +8,7 @@ export async function POST(req) {
   try {
     await connectToDatabase()
 
-    const { name, email, password, userType, phone } = await req.json()
+    const { name, email, password, userType, phone, bio, services, paypalEmail } = await req.json()
 
     // Check if user already exists
     const userExists = await User.findOne({ email })
@@ -21,7 +22,10 @@ export async function POST(req) {
       email,
       password, // Don't hash here, let the model do it
       userType,
-      phone,
+      phone: phone || "",
+      bio: bio || "",
+      services: services || [],
+      paypalEmail: paypalEmail || "",
     })
 
     // Generate JWT token
@@ -36,6 +40,10 @@ export async function POST(req) {
         name: user.name,
         email: user.email,
         userType: user.userType,
+        phone: user.phone,
+        bio: user.bio,
+        services: user.services,
+        paypalEmail: user.paypalEmail,
       },
     })
 

@@ -3,6 +3,83 @@ import connectToDatabase from "../../../lib/db"
 import Job from "../../../models/Job"
 import { handleProtectedRoute } from "../../../lib/auth"
 
+// Get all jobs
+export async function GET(req) {
+  try {
+    await connectToDatabase()
+
+    const { searchParams } = new URL(req.url)
+    const status = searchParams.get("status")
+    const category = searchParams.get("category")
+    const location = searchParams.get("location")
+    const minPrice = searchParams.get("minPrice")
+    const maxPrice = searchParams.get("maxPrice")
+    const search = searchParams.get("search")
+    const limit = Number.parseInt(searchParams.get("limit") || "50")
+    const page = Number.parseInt(searchParams.get("page") || "1")
+
+    // Build query
+    const query = {}
+
+    if (status) {
+      query.status = status
+    }
+
+    if (category) {
+      query.category = category
+    }
+
+    if (location) {
+      query.location = { $regex: location, $options: "i" }
+    }
+
+    if (minPrice || maxPrice) {
+      query.price = {}
+      if (minPrice) query.price.$gte = Number.parseFloat(minPrice)
+      if (maxPrice) query.price.$lte = Number.parseFloat(maxPrice)
+    }
+
+    if (search) {
+      query.$or = [{ title: { $regex: search, $options: "i" } }, { description: { $regex: search, $options: "i" } }]
+    }
+
+    // Calculate pagination
+    const skip = (page - 1) * limit
+
+    console.log("Jobs query:", query)
+    console.log("Skip:", skip, "Limit:", limit)
+
+    // Get jobs with populated fields, sorted by newest first
+    const jobs = await Job.find(query)
+      .populate("postedBy", "name email avatar")
+      .populate("hiredProvider", "name email avatar")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+
+    // Get total count for pagination
+    const total = await Job.countDocuments(query)
+
+    console.log(`Found ${jobs.length} jobs out of ${total} total`)
+
+    return NextResponse.json({
+      success: true,
+      count: jobs.length,
+      total,
+      pagination: {
+        page,
+        limit,
+        pages: Math.ceil(total / limit),
+      },
+      jobs,
+    })
+  } catch (error) {
+    console.error("Get jobs error:", error)
+    return NextResponse.json({ success: false, message: error.message }, { status: 500 })
+  }
+}
+
+// Create a new job
 export async function POST(req) {
   try {
     await connectToDatabase()
@@ -13,109 +90,39 @@ export async function POST(req) {
       return authResult
     }
 
-    const userId = authResult.user._id
-    const jobData = await req.json()
-
-    console.log("Received job data:", jobData)
+    const { title, description, category, location, price, date } = await req.json()
 
     // Validate required fields
-    const requiredFields = ["title", "description", "category", "price"]
-    const missingFields = requiredFields.filter((field) => !jobData[field])
+    if (!title || !description || !category || !location || !price || !date) {
+      return NextResponse.json({ success: false, message: "Please provide all required fields" }, { status: 400 })
+    }
 
-    if (missingFields.length > 0) {
-      console.error("Missing required fields:", missingFields)
-      return NextResponse.json(
-        { success: false, message: `Please provide all required fields: ${missingFields.join(", ")}` },
-        { status: 400 },
-      )
+    // Validate price
+    if (isNaN(Number.parseFloat(price)) || Number.parseFloat(price) <= 0) {
+      return NextResponse.json({ success: false, message: "Please provide a valid price" }, { status: 400 })
     }
 
     // Create job
     const job = await Job.create({
-      ...jobData,
-      postedBy: userId,
+      title,
+      description,
+      category,
+      location,
+      price: Number.parseFloat(price),
+      date: new Date(date),
+      postedBy: authResult.user._id,
       status: "active",
     })
 
+    // Populate the job with user details
+    await job.populate("postedBy", "name email avatar")
+
     return NextResponse.json({
       success: true,
-      message: "Job created successfully",
       job,
     })
   } catch (error) {
     console.error("Create job error:", error)
-    return NextResponse.json({ success: false, message: error.message }, { status: 500 })
-  }
-}
-
-export async function GET(req) {
-  try {
-    await connectToDatabase()
-
-    const { searchParams } = new URL(req.url)
-    const category = searchParams.get("category")
-    const status = searchParams.get("status")
-    const userId = searchParams.get("userId")
-    const search = searchParams.get("search")
-    const page = Number.parseInt(searchParams.get("page") || "1")
-    const limit = Number.parseInt(searchParams.get("limit") || "10")
-    const skip = (page - 1) * limit
-
-    // Build query
-    const query = {}
-
-    if (category) {
-      query.category = category
-    }
-
-    if (status) {
-      query.status = status
-    } else {
-      // By default, only show active jobs
-      query.status = "active"
-    }
-
-    if (userId) {
-      query.postedBy = userId
-    }
-
-    if (search) {
-      query.$or = [
-        { title: { $regex: search, $options: "i" } },
-        { description: { $regex: search, $options: "i" } },
-        { tags: { $in: [new RegExp(search, "i")] } },
-      ]
-    }
-
-    // Get jobs
-    const jobs = await Job.find(query)
-      .populate({
-        path: "postedBy",
-        select: "name email profileImage",
-      })
-      .populate({
-        path: "hiredProvider",
-        select: "name email profileImage",
-      })
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-
-    // Get total count
-    const total = await Job.countDocuments(query)
-
-    return NextResponse.json({
-      success: true,
-      jobs,
-      pagination: {
-        total,
-        page,
-        limit,
-        pages: Math.ceil(total / limit),
-      },
-    })
-  } catch (error) {
-    console.error("Get jobs error:", error)
     return NextResponse.json({ success: false, message: error.message }, { status: 500 })
   }
 }

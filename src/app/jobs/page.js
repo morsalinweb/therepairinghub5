@@ -1,4 +1,3 @@
-// jobs/page.js
 "use client"
 
 import { Label } from "@/components/ui/label"
@@ -39,7 +38,7 @@ export default function Jobs() {
         setFilteredJobs(jobs)
 
         // Extract unique categories
-        const uniqueCategories = [...new Set(jobs.map((job) => job.category))]
+        const uniqueCategories = [...new Set(jobs.map((job) => job.category).filter(Boolean))]
         setCategories(uniqueCategories)
       }
     } catch (error) {
@@ -71,7 +70,7 @@ export default function Jobs() {
     results = results.filter((job) => job.price >= priceRange[0] && job.price <= priceRange[1])
 
     // Category filter
-    if (category) {
+    if (category && category !== "all") {
       results = results.filter((job) => job.category === category)
     }
 

@@ -21,7 +21,27 @@ const userSchema = new mongoose.Schema(
     },
     avatar: {
       type: String,
-      default: null,
+      default: "",
+    },
+    bio: {
+      type: String,
+      default: "",
+    },
+    services: {
+      type: [String],
+      default: [],
+    },
+    skills: {
+      type: [String],
+      default: [],
+    },
+    phone: {
+      type: String,
+      default: "",
+    },
+    address: {
+      type: String,
+      default: "",
     },
     userType: {
       type: String,
@@ -73,9 +93,21 @@ const userSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    availableBalance: {
+      type: Number,
+      default: 0,
+    },
+    totalEarnings: {
+      type: Number,
+      default: 0,
+    },
+    totalSpending: {
+      type: Number,
+      default: 0,
+    },
     paypalEmail: {
       type: String,
-      default: null,
+      default: "",
     },
     conversations: [
       {
@@ -119,7 +151,7 @@ userSchema.index({ "conversations.with": 1, "conversations.job": 1 })
 // Encrypt password using bcrypt
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) {
-    return next() // ✅ return here to prevent rehashing
+    return next()
   }
 
   const salt = await bcrypt.genSalt(10)

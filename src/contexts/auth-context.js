@@ -1,4 +1,3 @@
-// contexts/auth-context.js
 "use client"
 
 import { createContext, useContext, useState, useEffect } from "react"
@@ -15,24 +14,41 @@ export const AuthProvider = ({ children }) => {
   const { toast } = useToast()
 
   // Check if user is logged in on initial load
-  // In your auth context
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        // This should automatically include cookies
-        const response = await fetch('/api/auth/me', {
-          credentials: 'include'
+        // Check if we have a token in localStorage
+        const token = localStorage.getItem("auth_token")
+        if (!token) {
+          setLoading(false)
+          return
+        }
+
+        // Verify the token with the server
+        const response = await fetch("/api/auth/me", {
+          credentials: "include",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
         })
 
         if (response.ok) {
           const data = await response.json()
           if (data.success) {
             setUser(data.user)
-            setIsAuthenticated(true)
+            // Store user data in localStorage for persistence
+            localStorage.setItem("user", JSON.stringify(data.user))
           }
+        } else {
+          // Token is invalid, remove it
+          localStorage.removeItem("auth_token")
+          localStorage.removeItem("user")
         }
       } catch (error) {
-        console.error('Auth check failed:', error)
+        console.error("Auth check failed:", error)
+        // Clear invalid tokens
+        localStorage.removeItem("auth_token")
+        localStorage.removeItem("user")
       } finally {
         setLoading(false)
       }
@@ -49,9 +65,10 @@ export const AuthProvider = ({ children }) => {
       if (success && user) {
         setUser(user)
 
-        // Store token in localStorage for API requests
+        // Store token and user data in localStorage
         if (token) {
           localStorage.setItem("auth_token", token)
+          localStorage.setItem("user", JSON.stringify(user))
         }
 
         toast({
@@ -89,9 +106,10 @@ export const AuthProvider = ({ children }) => {
       if (success && user) {
         setUser(user)
 
-        // Store token in localStorage for API requests
+        // Store token and user data in localStorage
         if (token) {
           localStorage.setItem("auth_token", token)
+          localStorage.setItem("user", JSON.stringify(user))
         }
 
         toast({
@@ -133,8 +151,9 @@ export const AuthProvider = ({ children }) => {
     try {
       await authAPI.logout()
 
-      // Remove token from localStorage
+      // Remove token and user data from localStorage
       localStorage.removeItem("auth_token")
+      localStorage.removeItem("user")
 
       setUser(null)
       toast({
@@ -147,6 +166,7 @@ export const AuthProvider = ({ children }) => {
 
       // Still remove token and user state even if API call fails
       localStorage.removeItem("auth_token")
+      localStorage.removeItem("user")
       setUser(null)
 
       toast({
@@ -160,16 +180,23 @@ export const AuthProvider = ({ children }) => {
     }
   }
 
+  // Update user data in context
+  const updateUserData = (updatedUser) => {
+    setUser((prevUser) => ({
+      ...prevUser,
+      ...updatedUser,
+    }))
+    // Update localStorage as well
+    localStorage.setItem("user", JSON.stringify({ ...user, ...updatedUser }))
+  }
+
   // Update user profile
   const updateProfile = async (userId, profileData) => {
     setLoading(true)
     try {
       const { success, user: updatedUser } = await authAPI.updateProfile(userId, profileData)
       if (success) {
-        setUser((prevUser) => ({
-          ...prevUser,
-          ...updatedUser,
-        }))
+        updateUserData(updatedUser)
         toast({
           title: "Profile updated",
           description: "Your profile has been updated successfully.",
@@ -195,8 +222,9 @@ export const AuthProvider = ({ children }) => {
     try {
       const { success } = await authAPI.deleteAccount(userId)
       if (success) {
-        // Remove token from localStorage
+        // Remove token and user data from localStorage
         localStorage.removeItem("auth_token")
+        localStorage.removeItem("user")
 
         setUser(null)
         toast({
@@ -228,6 +256,7 @@ export const AuthProvider = ({ children }) => {
         login,
         logout,
         updateProfile,
+        updateUserData,
         deleteAccount,
         isAuthenticated: !!user,
       }}

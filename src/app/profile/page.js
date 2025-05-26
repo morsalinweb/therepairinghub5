@@ -15,6 +15,7 @@ import { Loader2, Save, UserIcon } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/contexts/auth-context"
 import { userAPI } from "@/lib/api"
+import FinancialDashboard from "@/components/financial-dashboard"
 
 export default function ProfilePage() {
   const { user, loading, updateUserData } = useAuth()
@@ -36,8 +37,12 @@ export default function ProfilePage() {
       router.push("/login")
     }
 
+
+    console.log("User data:", user);
+
     if (user) {
-      reset({
+      // Reset form with current user data
+      const formData = {
         name: user.name || "",
         email: user.email || "",
         phone: user.phone || "",
@@ -45,7 +50,10 @@ export default function ProfilePage() {
         bio: user.bio || "",
         skills: user.skills ? user.skills.join(", ") : "",
         paypalEmail: user.paypalEmail || "",
-      })
+      }
+
+      console.log("Resetting form with user data:", formData)
+      reset(formData)
 
       if (user.avatar) {
         setAvatarPreview(user.avatar)
@@ -72,16 +80,22 @@ export default function ProfilePage() {
       // Format skills as array
       const formattedData = {
         ...data,
-        skills: data.skills ? data.skills.split(",").map((skill) => skill.trim()) : [],
+        skills: data.skills
+          ? data.skills
+            .split(",")
+            .map((skill) => skill.trim())
+            .filter((skill) => skill)
+          : [],
       }
 
       // Handle avatar upload if changed
       if (avatarFile) {
-        const formData = new FormData()
-        formData.append("avatar", avatarFile)
         // In a real app, you would upload the avatar to a storage service
-        // For this demo, we'll skip this step
+        // For this demo, we'll use the preview as the avatar
+        formattedData.avatar = avatarPreview
       }
+
+      console.log("Updating profile with data:", formattedData)
 
       // Update user profile
       const result = await userAPI.updateProfile(formattedData)
@@ -93,7 +107,9 @@ export default function ProfilePage() {
         })
 
         // Update user data in context
-        updateUserData(result.user)
+        if (updateUserData) {
+          updateUserData(result.user)
+        }
       } else {
         toast({
           title: "Update failed",
@@ -129,7 +145,8 @@ export default function ProfilePage() {
         <TabsList className="mb-6">
           <TabsTrigger value="profile">Profile Information</TabsTrigger>
           <TabsTrigger value="account">Account Settings</TabsTrigger>
-          {user?.userType === "Seller" && <TabsTrigger value="payment">Payment Settings</TabsTrigger>}
+          <TabsTrigger value="payment">Payment Settings</TabsTrigger>
+          <TabsTrigger value="finance">Financial Dashboard</TabsTrigger>
         </TabsList>
 
         <form onSubmit={handleSubmit(onSubmit)}>
@@ -253,9 +270,15 @@ export default function ProfilePage() {
                   <Input
                     id="new-password"
                     type="password"
-                    {...register("newPassword")}
+                    {...register("newPassword", {
+                      minLength: {
+                        value: 6,
+                        message: "Password must be at least 6 characters",
+                      },
+                    })}
                     placeholder="Enter a new password"
                   />
+                  {errors.newPassword && <p className="text-sm text-red-500">{errors.newPassword.message}</p>}
                 </div>
 
                 <div className="space-y-2">
@@ -263,9 +286,16 @@ export default function ProfilePage() {
                   <Input
                     id="confirm-password"
                     type="password"
-                    {...register("confirmPassword")}
+                    {...register("confirmPassword", {
+                      validate: (value, { newPassword }) => {
+                        if (newPassword && value !== newPassword) {
+                          return "Passwords do not match"
+                        }
+                      },
+                    })}
                     placeholder="Confirm your new password"
                   />
+                  {errors.confirmPassword && <p className="text-sm text-red-500">{errors.confirmPassword.message}</p>}
                 </div>
               </CardContent>
               <CardFooter className="flex justify-end">
@@ -286,50 +316,54 @@ export default function ProfilePage() {
             </Card>
           </TabsContent>
 
-          {user?.userType === "Seller" && (
-            <TabsContent value="payment">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Payment Settings</CardTitle>
-                  <CardDescription>Manage your payment preferences and withdrawal methods</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  <div className="space-y-2">
-                    <Label htmlFor="paypal-email">PayPal Email</Label>
-                    <Input
-                      id="paypal-email"
-                      type="email"
-                      {...register("paypalEmail", {
-                        pattern: {
-                          value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
-                          message: "Invalid email address",
-                        },
-                      })}
-                      placeholder="Your PayPal email address"
-                    />
-                    {errors.paypalEmail && <p className="text-sm text-red-500">{errors.paypalEmail.message}</p>}
-                    <p className="text-sm text-muted-foreground mt-1">This email will be used for PayPal withdrawals</p>
-                  </div>
-                </CardContent>
-                <CardFooter className="flex justify-end">
-                  <Button type="submit" disabled={isUpdating}>
-                    {isUpdating ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Saving...
-                      </>
-                    ) : (
-                      <>
-                        <Save className="mr-2 h-4 w-4" />
-                        Save Changes
-                      </>
-                    )}
-                  </Button>
-                </CardFooter>
-              </Card>
-            </TabsContent>
-          )}
+          <TabsContent value="payment">
+            <Card>
+              <CardHeader>
+                <CardTitle>Payment Settings</CardTitle>
+                <CardDescription>Manage your payment preferences and withdrawal methods</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-2">
+                  <Label htmlFor="paypal-email">PayPal Email</Label>
+                  <Input
+                    id="paypal-email"
+                    type="email"
+                    {...register("paypalEmail", {
+                      pattern: {
+                        value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
+                        message: "Invalid email address",
+                      },
+                    })}
+                    placeholder="Your PayPal email address"
+                  />
+                  {errors.paypalEmail && <p className="text-sm text-red-500">{errors.paypalEmail.message}</p>}
+                  <p className="text-sm text-muted-foreground mt-1">
+                    This email will be used for PayPal withdrawals and payments
+                  </p>
+                </div>
+              </CardContent>
+              <CardFooter className="flex justify-end">
+                <Button type="submit" disabled={isUpdating}>
+                  {isUpdating ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="mr-2 h-4 w-4" />
+                      Save Changes
+                    </>
+                  )}
+                </Button>
+              </CardFooter>
+            </Card>
+          </TabsContent>
         </form>
+
+        <TabsContent value="finance">
+          <FinancialDashboard />
+        </TabsContent>
       </Tabs>
     </div>
   )

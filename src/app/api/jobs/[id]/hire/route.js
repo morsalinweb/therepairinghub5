@@ -2,180 +2,97 @@ import { NextResponse } from "next/server"
 import connectToDatabase from "../../../../../lib/db"
 import Job from "../../../../../models/Job"
 import User from "../../../../../models/User"
+import Transaction from "../../../../../models/Transaction"
+import Notification from "../../../../../models/Notification"
 import { handleProtectedRoute } from "../../../../../lib/auth"
 
-// Hire a provider for a job
-export async function POST(req, { params }) {
+export async function POST(req) {
   try {
     await connectToDatabase()
 
     // Check authentication
-    const authResult = await handleProtectedRoute(req, ["Buyer", "Admin"])
+    const authResult = await handleProtectedRoute(req)
     if (!authResult.success) {
       return authResult
     }
 
-    const jobId = params.id
+    const { id: jobId } = req.nextUrl.pathname.split("/").slice(-2, -1)
     const { providerId } = await req.json()
+
+    console.log("Hiring provider:", { jobId, providerId, userId: authResult.user._id })
 
     // Validate input
     if (!providerId) {
-      return NextResponse.json({ success: false, message: "Please provide provider ID" }, { status: 400 })
+      return NextResponse.json({ success: false, message: "Provider ID is required" }, { status: 400 })
     }
 
-    // Find job
-    const job = await Job.findById(jobId)
+    // Find the job
+    const job = await Job.findById(jobId).populate("postedBy", "name email")
+
     if (!job) {
       return NextResponse.json({ success: false, message: "Job not found" }, { status: 404 })
     }
 
-    // Check if user is authorized to hire for this job
-    const isJobPoster = job.postedBy.toString() === authResult.user._id.toString()
-    const isAdmin = authResult.user.userType === "Admin"
-
-    if (!isJobPoster && !isAdmin) {
-      return NextResponse.json({ success: false, message: "Not authorized to hire for this job" }, { status: 403 })
+    // Check if user is the job poster
+    if (job.postedBy._id.toString() !== authResult.user._id.toString()) {
+      return NextResponse.json({ success: false, message: "Only the job poster can hire providers" }, { status: 403 })
     }
 
-    // Check if job is active
+    // Check if job is still active
     if (job.status !== "active") {
       return NextResponse.json({ success: false, message: "Can only hire for active jobs" }, { status: 400 })
     }
 
-    // Check if provider has submitted a quote
-    const provider = await User.findOne(
-      {
-        _id: providerId,
-        "quotedJobs.job": jobId,
-      },
-      { "quotedJobs.$": 1 },
-    )
-
+    // Find the provider
+    const provider = await User.findById(providerId)
     if (!provider) {
-      return NextResponse.json(
-        { success: false, message: "Provider has not submitted a quote for this job" },
-        { status: 400 },
-      )
+      return NextResponse.json({ success: false, message: "Provider not found" }, { status: 404 })
     }
 
-    // Update job status and hired provider
+    // Set escrow end date to 1 minute from now
+    const escrowEndDate = new Date()
+    escrowEndDate.setMinutes(escrowEndDate.getMinutes() + 1)
+
+    // Update job status and assign provider
     const updatedJob = await Job.findByIdAndUpdate(
       jobId,
       {
         status: "in_progress",
         hiredProvider: providerId,
-        paymentStatus: "paid", // Assuming payment is processed before hiring
+        escrowEndDate: escrowEndDate,
       },
       { new: true },
     )
       .populate("postedBy", "name email avatar")
       .populate("hiredProvider", "name email avatar")
 
-    // Update job in user's postedJobs array
-    await User.updateOne(
-      {
-        _id: job.postedBy,
-        "postedJobs.jobId": jobId,
-      },
-      {
-        $set: {
-          "postedJobs.$.status": "in_progress",
-          "postedJobs.$.hiredProvider": providerId,
-          "postedJobs.$.updatedAt": new Date(),
-        },
-      },
-    )
+    // Create transaction record
+    await Transaction.create({
+      job: jobId,
+      buyer: authResult.user._id,
+      seller: providerId,
+      amount: job.price,
+      type: "job_payment",
+      status: "completed",
+      paymentMethod: "escrow",
+      description: `Payment for job: ${job.title}`,
+    })
 
-    // Update provider's quote status
-    await User.updateOne(
-      {
-        _id: providerId,
-        "quotedJobs.job": jobId,
-      },
-      {
-        $set: {
-          "quotedJobs.$.quote.status": "accepted",
-        },
-      },
-    )
+    // Create notification for the hired provider
+    await Notification.create({
+      recipient: providerId,
+      sender: authResult.user._id,
+      type: "job_hired",
+      message: `You have been hired for the job: ${job.title}`,
+      relatedId: jobId,
+      onModel: "Job",
+    })
 
-    // Update other providers' quote statuses to rejected
-    await User.updateMany(
-      {
-        _id: { $ne: providerId },
-        "quotedJobs.job": jobId,
-      },
-      {
-        $set: {
-          "quotedJobs.$.quote.status": "rejected",
-        },
-      },
-    )
-
-    // Create notification for hired provider
-    await User.updateOne(
-      { _id: providerId },
-      {
-        $push: {
-          notifications: {
-            type: "hire",
-            message: `You've been hired for job: ${job.title}`,
-            sender: authResult.user._id,
-            relatedId: job._id,
-            onModel: "Job",
-            read: false,
-            createdAt: new Date(),
-          },
-        },
-      },
-    )
-
-    // Create transaction records
-    const quoteAmount = provider.quotedJobs[0].quote.price
-    const serviceFee = quoteAmount * 0.1 // 10% service fee
-
-    // Add transaction to buyer's record (payment to escrow)
-    await User.updateOne(
-      { _id: job.postedBy },
-      {
-        $push: {
-          transactions: {
-            type: "escrow",
-            amount: -quoteAmount,
-            job: jobId,
-            otherParty: providerId,
-            status: "completed",
-            description: `Payment to escrow for job: ${job.title}`,
-            createdAt: new Date(),
-          },
-        },
-      },
-    )
-
-    // Add transaction to provider's record (payment in escrow)
-    await User.updateOne(
-      { _id: providerId },
-      {
-        $inc: {
-          "financialSummary.inEscrow": quoteAmount - serviceFee,
-        },
-        $push: {
-          transactions: {
-            type: "escrow",
-            amount: quoteAmount - serviceFee,
-            job: jobId,
-            otherParty: job.postedBy,
-            status: "pending",
-            serviceFee,
-            description: `Payment in escrow for job: ${job.title}`,
-            createdAt: new Date(),
-          },
-        },
-      },
-    )
+    console.log("Job updated successfully:", updatedJob)
 
     return NextResponse.json({
       success: true,
+      message: "Provider hired successfully",
       job: updatedJob,
     })
   } catch (error) {

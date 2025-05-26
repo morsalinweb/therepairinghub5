@@ -1,11 +1,9 @@
-// api/jobs/id/route.js
 import { NextResponse } from "next/server"
 import connectToDatabase from "../../../../lib/db"
 import Job from "../../../../models/Job"
 import Quote from "../../../../models/Quote"
 import { handleProtectedRoute } from "../../../../lib/auth"
-// Remove socket.io import
-// import { notifyJobUpdate } from "../../../../lib/socket"
+import { broadcastJobUpdate } from "../../../../lib/websocket-utils"
 
 // Get job by ID
 export async function GET(req, { params }) {
@@ -15,7 +13,7 @@ export async function GET(req, { params }) {
     // Check authentication
     const authResult = await handleProtectedRoute(req)
     if (!authResult.success) {
-      return authResult
+      return NextResponse.json({ success: false, message: authResult.message }, { status: authResult.status || 401 })
     }
 
     // Get job
@@ -49,7 +47,7 @@ export async function PUT(req, { params }) {
     // Check authentication
     const authResult = await handleProtectedRoute(req)
     if (!authResult.success) {
-      return authResult
+      return NextResponse.json({ success: false, message: authResult.message }, { status: authResult.status || 401 })
     }
 
     const jobId = params.id
@@ -71,8 +69,13 @@ export async function PUT(req, { params }) {
       .populate("postedBy", "name email avatar")
       .populate("hiredProvider", "name email avatar")
 
-    // We'll handle job updates through our new system instead of socket.io
-    // notifyJobUpdate(jobId, { action: "updated", job: updatedJob })
+    // Broadcast job update via WebSocket
+    try {
+      broadcastJobUpdate(jobId, { action: "updated", job: updatedJob })
+    } catch (error) {
+      console.error("Error broadcasting job update:", error)
+      // Non-critical error, continue execution
+    }
 
     return NextResponse.json({
       success: true,
@@ -92,7 +95,7 @@ export async function DELETE(req, { params }) {
     // Check authentication
     const authResult = await handleProtectedRoute(req)
     if (!authResult.success) {
-      return authResult
+      return NextResponse.json({ success: false, message: authResult.message }, { status: authResult.status || 401 })
     }
 
     const jobId = params.id
@@ -121,6 +124,14 @@ export async function DELETE(req, { params }) {
 
     // Delete associated quotes
     await Quote.deleteMany({ job: jobId })
+
+    // Broadcast job deletion via WebSocket
+    try {
+      broadcastJobUpdate(jobId, { action: "deleted", jobId })
+    } catch (error) {
+      console.error("Error broadcasting job deletion:", error)
+      // Non-critical error, continue execution
+    }
 
     return NextResponse.json({
       success: true,

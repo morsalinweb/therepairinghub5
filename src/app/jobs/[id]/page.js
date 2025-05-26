@@ -1,4 +1,3 @@
-// jobs/id/page.js
 "use client"
 
 import { Label } from "@/components/ui/label"
@@ -25,13 +24,14 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { useAuth } from "@/contexts/auth-context"
-import { jobAPI, quoteAPI, messageAPI } from "@/lib/api"
+import { jobAPI, quoteAPI, messageAPI, reviewAPI } from "@/lib/api"
 import { useRealTimeUpdates, eventEmitter } from "@/lib/websocket-client"
 import { useAppDispatch, useAppSelector } from "@/lib/redux/hooks"
 import { setCurrentJob, updateJob } from "@/lib/redux/slices/jobSlice"
 import { setQuotes, addQuote } from "@/lib/redux/slices/quoteSlice"
 import { setMessages, addMessage, setCurrentConversation } from "@/lib/redux/slices/messageSlice"
 import PaymentModal from "@/components/payment-modal"
+import CountdownTimer from "@/components/countdown-timer"
 
 export default function JobDetails({ params }) {
   const router = useRouter()
@@ -57,56 +57,26 @@ export default function JobDetails({ params }) {
   const [newMessage, setNewMessage] = useState("")
   const [messageRecipient, setMessageRecipient] = useState(null)
   const [activeTab, setActiveTab] = useState("quotes")
-  const [authChecked, setAuthChecked] = useState(false)
   const messagesEndRef = useRef(null)
   const messagesContainerRef = useRef(null)
   const { startMessagePolling, stopMessagePolling, subscribeToJobUpdates, sendMessage } = useRealTimeUpdates()
 
-  // Check authentication and fetch job details
+  // Review modal state
+  const [showReviewModal, setShowReviewModal] = useState(false)
+  const [reviewData, setReviewData] = useState({ rating: 5, comment: "" })
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false)
+
   useEffect(() => {
-    const fetchData = async () => {
-      if (authLoading) return
+    // Wait for authentication to complete
+    if (authLoading) return
 
-      setAuthChecked(true)
-
-      if (!isAuthenticated) {
-        // Store the current URL to redirect back after login
-        const currentPath = window.location.pathname
-        // If not authenticated, redirect to login
-        router.push(`/login?redirect=${encodeURIComponent(currentPath)}`)
-        return
-      }
-
-      try {
-        setIsLoading(true)
-        const { success, job, quotes } = await jobAPI.getJob(params.id)
-
-        if (success && job) {
-          dispatch(setCurrentJob(job))
-          dispatch(setQuotes(quotes || []))
-
-          // Set message recipient based on user type with null checks
-          if (user?.userType === "Buyer" && job.hiredProvider) {
-            setMessageRecipient(job.hiredProvider)
-            fetchMessages(job.hiredProvider._id)
-          } else if (user?.userType === "Seller" && job.postedBy) {
-            setMessageRecipient(job.postedBy)
-            fetchMessages(job.postedBy._id)
-          }
-        }
-      } catch (error) {
-        console.error("Error fetching job:", error)
-        toast({
-          title: "Error",
-          description: "Failed to load job details.",
-          variant: "destructive",
-        })
-      } finally {
-        setIsLoading(false)
-      }
+    if (!isAuthenticated) {
+      // If not authenticated, redirect to login
+      router.push("/login?redirect=" + encodeURIComponent(`/jobs/${params.id}`))
+      return
     }
 
-    fetchData()
+    fetchJobDetails()
 
     // Cleanup function
     return () => {
@@ -115,7 +85,7 @@ export default function JobDetails({ params }) {
       dispatch(setQuotes([]))
       stopMessagePolling()
     }
-  }, [params.id, isAuthenticated, authLoading, dispatch, router, stopMessagePolling, user])
+  }, [params.id, isAuthenticated, authLoading, dispatch, router, stopMessagePolling])
 
   // Subscribe to real-time job updates
   useEffect(() => {
@@ -179,6 +149,97 @@ export default function JobDetails({ params }) {
       messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight
     }
   }, [messages])
+
+  // Auto-complete function when timer expires
+  const handleTimerComplete = async () => {
+    if (job?.status === "in_progress") {
+      try {
+        const { success, job: updatedJob } = await jobAPI.completeJob(job._id)
+        if (success) {
+          dispatch(updateJob(updatedJob))
+          toast({
+            title: "Job completed automatically",
+            description: "The escrow period has ended and the job has been marked as completed.",
+          })
+        }
+      } catch (error) {
+        console.error("Auto-complete error:", error)
+      }
+    }
+  }
+
+  // Review submission function
+  const handleSubmitReview = async () => {
+    if (!reviewData.comment.trim()) {
+      toast({
+        title: "Review required",
+        description: "Please provide a comment for your review.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsSubmittingReview(true)
+
+    try {
+      const revieweeId = user?.userType === "Buyer" ? job.hiredProvider?._id : job.postedBy?._id
+
+      const { success } = await reviewAPI.createReview({
+        jobId: job._id,
+        revieweeId,
+        rating: reviewData.rating,
+        comment: reviewData.comment,
+      })
+
+      if (success) {
+        toast({
+          title: "Review submitted",
+          description: "Your review has been submitted successfully.",
+        })
+        setShowReviewModal(false)
+        setReviewData({ rating: 5, comment: "" })
+      }
+    } catch (error) {
+      console.error("Review submission error:", error)
+      toast({
+        title: "Review failed",
+        description: error.response?.data?.message || "There was a problem submitting your review.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSubmittingReview(false)
+    }
+  }
+
+  const fetchJobDetails = async () => {
+    try {
+      setIsLoading(true)
+      const { success, job, quotes } = await jobAPI.getJob(params.id)
+
+      if (success && job) {
+        dispatch(setCurrentJob(job))
+        dispatch(setQuotes(quotes || []))
+
+        // Set message recipient based on user type with null checks
+        if (user?.userType === "Buyer" && job.hiredProvider) {
+          setMessageRecipient(job.hiredProvider)
+          fetchMessages(job.hiredProvider._id)
+        } else if (user?.userType === "Seller" && job.postedBy) {
+          setMessageRecipient(job.postedBy)
+          fetchMessages(job.postedBy._id)
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching job:", error)
+      toast({
+        title: "Error",
+        description: "Failed to load job details.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   const fetchMessages = async (recipientId) => {
     if (!recipientId) return
@@ -383,32 +444,48 @@ export default function JobDetails({ params }) {
     setActiveTab("messages")
   }
 
-  // Show loading state while authentication is being checked
-  if (authLoading || !authChecked) {
-    return (
-      <div className="flex justify-center items-center min-h-[60vh]">
-        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-        <span className="ml-2">Checking authentication...</span>
-      </div>
-    )
+  const handleMarkComplete = async () => {
+    // Check if timer has expired
+    if (job?.escrowEndDate) {
+      const now = new Date()
+      const escrowEndDate = new Date(job.escrowEndDate)
+
+      if (now < escrowEndDate) {
+        const timeRemaining = Math.ceil((escrowEndDate - now) / 1000)
+        toast({
+          title: "Cannot complete yet",
+          description: `Please wait ${timeRemaining} seconds before marking the job as completed`,
+          variant: "destructive",
+        })
+        return
+      }
+    }
+
+    if (confirm("Are you sure you want to mark this job as completed?")) {
+      try {
+        const { success, job: updatedJob } = await jobAPI.completeJob(job._id)
+        if (success) {
+          dispatch(updateJob(updatedJob))
+          toast({
+            title: "Job completed",
+            description: "The job has been marked as completed successfully.",
+          })
+        }
+      } catch (error) {
+        console.error("Mark complete error:", error)
+        toast({
+          title: "Action failed",
+          description: error.response?.data?.message || "There was a problem marking the job as completed.",
+          variant: "destructive",
+        })
+      }
+    }
   }
 
-  // If authentication check is complete but user is not authenticated,
-  // we'll redirect in the useEffect, so just show loading
-  if (!isAuthenticated) {
+  if (isLoading || jobLoading || authLoading) {
     return (
       <div className="flex justify-center items-center min-h-[60vh]">
         <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-        <span className="ml-2">Redirecting to login...</span>
-      </div>
-    )
-  }
-
-  if (isLoading || jobLoading) {
-    return (
-      <div className="flex justify-center items-center min-h-[60vh]">
-        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-        <span className="ml-2">Loading job details...</span>
       </div>
     )
   }
@@ -450,7 +527,7 @@ export default function JobDetails({ params }) {
                     </div>
                     <div className="flex items-center">
                       <Calendar className="h-4 w-4 mr-1" />
-                      {new Date(job.date || job.createdAt).toLocaleDateString()}
+                      {new Date(job.date).toLocaleDateString()}
                     </div>
                     <div className="flex items-center">
                       <Clock className="h-4 w-4 mr-1" />
@@ -504,26 +581,30 @@ export default function JobDetails({ params }) {
 
                 <div>
                   <h3 className="text-lg font-semibold">Posted By</h3>
-                  <div className="flex items-center mt-2">
-                    <Avatar className="h-10 w-10 mr-3">
-                      <AvatarImage
-                        src={job?.postedBy?.avatar || "/placeholder.svg?height=40&width=40"}
-                        alt={job?.postedBy?.name || "User"}
-                      />
-                      <AvatarFallback>
-                        {job?.postedBy?.name
-                          ? job?.postedBy?.name
-                            .split(" ")
-                            .map((n) => n[0])
-                            .join("")
-                          : "U"}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div>
-                      <p className="font-medium">{job?.postedBy?.name || job?.postedBy?.email || "User"}</p>
-                      <p className="text-sm text-gray-500">Job Poster</p>
+                  <Link href={`/users/${job?.postedBy?._id}`} className="block mt-2">
+                    <div className="flex items-center cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 p-2 rounded-lg transition-colors">
+                      <Avatar className="h-10 w-10 mr-3">
+                        <AvatarImage
+                          src={job?.postedBy?.avatar || "/placeholder.svg?height=40&width=40"}
+                          alt={job?.postedBy?.name || "User"}
+                        />
+                        <AvatarFallback>
+                          {job?.postedBy?.name
+                            ? job?.postedBy?.name
+                                .split(" ")
+                                .map((n) => n[0])
+                                .join("")
+                            : "U"}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <p className="font-medium text-blue-600 hover:text-blue-800">
+                          {job?.postedBy?.name || job?.postedBy?.email || "User"}
+                        </p>
+                        <p className="text-sm text-gray-500">Job Poster • Click to view profile</p>
+                      </div>
                     </div>
-                  </div>
+                  </Link>
                 </div>
               </div>
             </CardContent>
@@ -548,7 +629,10 @@ export default function JobDetails({ params }) {
                         {quotes.map((quote) => (
                           <div key={quote._id} className="border rounded-lg p-4">
                             <div className="flex justify-between items-start mb-4">
-                              <div className="flex items-center">
+                              <Link
+                                href={`/users/${quote.provider?._id}`}
+                                className="flex items-center cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 p-2 rounded-lg transition-colors"
+                              >
                                 <Avatar className="h-10 w-10 mr-3">
                                   <AvatarImage
                                     src={quote.provider?.avatar || "/placeholder.svg?height=40&width=40"}
@@ -557,21 +641,21 @@ export default function JobDetails({ params }) {
                                   <AvatarFallback>
                                     {quote.provider?.name
                                       ? quote.provider.name
-                                        .split(" ")
-                                        .map((n) => n[0])
-                                        .join("")
+                                          .split(" ")
+                                          .map((n) => n[0])
+                                          .join("")
                                       : "P"}
                                   </AvatarFallback>
                                 </Avatar>
                                 <div>
-                                  <p className="font-medium">
+                                  <p className="font-medium text-blue-600 hover:text-blue-800">
                                     {quote.provider?.name || quote.provider?.email || "Provider"}
                                   </p>
                                   <p className="text-sm text-gray-500">
-                                    {new Date(quote.createdAt).toLocaleDateString()}
+                                    {new Date(quote.createdAt).toLocaleDateString()} • Click to view profile
                                   </p>
                                 </div>
-                              </div>
+                              </Link>
                               <div className="text-xl font-bold text-green-600">${quote.price}</div>
                             </div>
 
@@ -692,10 +776,11 @@ export default function JobDetails({ params }) {
                               className={`flex ${message.sender._id === user?._id ? "justify-end" : "justify-start"}`}
                             >
                               <div
-                                className={`max-w-[80%] rounded-lg p-3 ${message.sender._id === user?._id
+                                className={`max-w-[80%] rounded-lg p-3 ${
+                                  message.sender._id === user?._id
                                     ? "bg-blue-600 text-white"
                                     : "bg-gray-100 dark:bg-gray-800"
-                                  }`}
+                                }`}
                               >
                                 <div className="text-xs mb-1">
                                   {message.sender._id !== user?._id && (
@@ -781,6 +866,17 @@ export default function JobDetails({ params }) {
                 </p>
               </div>
 
+              {/* Timer Display */}
+              {job.status === "in_progress" && job.escrowEndDate && (
+                <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg">
+                  <h3 className="text-sm font-medium text-blue-700 dark:text-blue-300 mb-2">Escrow Timer</h3>
+                  <CountdownTimer endDate={job.escrowEndDate} onComplete={handleTimerComplete} />
+                  <p className="text-xs text-blue-600 dark:text-blue-400 mt-2">
+                    Job will auto-complete when timer reaches zero
+                  </p>
+                </div>
+              )}
+
               <div>
                 <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Budget</h3>
                 <p className="font-semibold mt-1">${job.price}</p>
@@ -813,9 +909,9 @@ export default function JobDetails({ params }) {
                       <AvatarFallback>
                         {job?.hiredProvider?.name
                           ? job?.hiredProvider.name
-                            .split(" ")
-                            .map((n) => n[0])
-                            .join("")
+                              .split(" ")
+                              .map((n) => n[0])
+                              .join("")
                           : "P"}
                       </AvatarFallback>
                     </Avatar>
@@ -830,38 +926,23 @@ export default function JobDetails({ params }) {
                   </div>
 
                   {user?.userType === "Buyer" && user._id === job.postedBy?._id && (
-                    <Button
-                      className="w-full mt-4"
-                      onClick={async () => {
-                        if (confirm("Are you sure you want to mark this job as completed?")) {
-                          try {
-                            const { success, job: updatedJob } = await jobAPI.updateJob(job._id, {
-                              status: "completed",
-                            })
-                            if (success) {
-                              dispatch(updateJob(updatedJob))
-                              toast({
-                                title: "Job completed",
-                                description: "The job has been marked as completed successfully.",
-                              })
-                            }
-                          } catch (error) {
-                            console.error("Mark complete error:", error)
-                            toast({
-                              title: "Action failed",
-                              description:
-                                error.response?.data?.message || "There was a problem marking the job as completed.",
-                              variant: "destructive",
-                            })
-                          }
-                        }
-                      }}
-                    >
+                    <Button className="w-full mt-4" onClick={handleMarkComplete}>
                       Mark as Completed
                     </Button>
                   )}
                 </div>
               )}
+
+              {/* Add review button for completed jobs */}
+              {job.status === "completed" &&
+                ((user?.userType === "Buyer" && user._id === job.postedBy?._id) ||
+                  (user?.userType === "Seller" && user._id === job.hiredProvider?._id)) && (
+                  <div className="border-t pt-4 mt-4">
+                    <Button className="w-full" onClick={() => setShowReviewModal(true)}>
+                      Leave a Review
+                    </Button>
+                  </div>
+                )}
 
               {user?.userType === "Buyer" && user._id === job.postedBy?._id && job.status === "active" && (
                 <div className="border-t pt-4 mt-4">
@@ -946,6 +1027,59 @@ export default function JobDetails({ params }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Review modal at the end of the component */}
+      {showReviewModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold mb-4">Leave a Review</h3>
+
+            <div className="space-y-4">
+              <div>
+                <Label>Rating</Label>
+                <div className="flex space-x-1 mt-1">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      key={star}
+                      type="button"
+                      onClick={() => setReviewData((prev) => ({ ...prev, rating: star }))}
+                      className={`text-2xl ${star <= reviewData.rating ? "text-yellow-400" : "text-gray-300"}`}
+                    >
+                      ★
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <Label>Comment</Label>
+                <Textarea
+                  value={reviewData.comment}
+                  onChange={(e) => setReviewData((prev) => ({ ...prev, comment: e.target.value }))}
+                  placeholder="Share your experience..."
+                  rows={4}
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-2 mt-6">
+              <Button variant="outline" onClick={() => setShowReviewModal(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleSubmitReview} disabled={isSubmittingReview}>
+                {isSubmittingReview ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Submitting...
+                  </>
+                ) : (
+                  "Submit Review"
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

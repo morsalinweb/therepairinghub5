@@ -1,50 +1,90 @@
 const express = require("express")
-const next = require("next")
-const { createServer } = require("http")
-const { initializeWebSocketServer } = require("./lib/websocket")
-const mongoose = require("mongoose")
-const cookieParser = require("cookie-parser")
+const http = require("http")
+const socketIo = require("socket.io")
 const cors = require("cors")
-require("dotenv").config()
+const cron = require("node-cron")
 
-const dev = process.env.NODE_ENV !== "production"
-const app = next({ dev })
-const handle = app.getRequestHandler()
-const port = process.env.PORT || 3000
+const app = express()
+const server = http.createServer(app)
 
-app.prepare().then(() => {
-  const server = express()
+// Configure CORS for Socket.IO
+const io = socketIo(server, {
+  cors: {
+    origin: process.env.NEXT_PUBLIC_FRONTEND_URL || "http://localhost:3000",
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
+})
 
-  // Middleware
-  server.use(cookieParser())
-  server.use(express.json({ limit: "50mb" }))
-  server.use(
-    cors({
-      origin: process.env.NEXT_PUBLIC_FRONTEND_URL || "http://localhost:3000",
-      credentials: true,
-    }),
-  )
+// Middleware
+app.use(cors())
+app.use(express.json())
 
-  // Create HTTP server
-  const httpServer = createServer(server)
+// Socket.IO connection handling
+io.on("connection", (socket) => {
+  console.log("User connected:", socket.id)
 
-  // Initialize WebSocket server
-  initializeWebSocketServer(httpServer)
-
-  // Handle all Next.js requests
-  server.all("*", (req, res) => {
-    return handle(req, res)
+  // Join job-specific room
+  socket.on("join_job", (jobId) => {
+    socket.join(`job_${jobId}`)
+    console.log(`User ${socket.id} joined job room: job_${jobId}`)
   })
 
-  // Connect to MongoDB
-  mongoose
-    .connect(process.env.MONGODB_URI)
-    .then(() => console.log("MongoDB connected"))
-    .catch((err) => console.error("MongoDB connection error:", err))
+  // Handle new messages
+  socket.on("new_message", (data) => {
+    console.log("New message received:", data)
+    // Broadcast to job room
+    socket.to(`job_${data.jobId}`).emit("message_received", data)
+  })
 
-  // Start server
-  httpServer.listen(port, (err) => {
-    if (err) throw err
-    console.log(`> Ready on http://localhost:${port}`)
+  // Handle job updates
+  socket.on("job_update", (data) => {
+    console.log("Job update received:", data)
+    // Broadcast to job room
+    socket.to(`job_${data.jobId}`).emit("job_updated", data)
+  })
+
+  socket.on("disconnect", () => {
+    console.log("User disconnected:", socket.id)
   })
 })
+
+// Auto-complete jobs cron job - runs every minute
+cron.schedule("* * * * *", async () => {
+  try {
+    console.log("Running auto-complete job check...")
+
+    const response = await fetch(`${process.env.NEXT_PUBLIC_FRONTEND_URL}/api/jobs/auto-complete`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-auto-complete": "true",
+      },
+    })
+
+    if (response.ok) {
+      const result = await response.json()
+      console.log("Auto-complete check result:", result)
+
+      // Notify clients about completed jobs
+      if (result.completedJobs && result.completedJobs.length > 0) {
+        result.completedJobs.forEach((job) => {
+          io.to(`job_${job._id}`).emit("job_updated", {
+            action: "completed",
+            job: job,
+          })
+        })
+      }
+    }
+  } catch (error) {
+    console.error("Auto-complete cron job error:", error)
+  }
+})
+
+const PORT = process.env.PORT || 3001
+
+server.listen(PORT, () => {
+  console.log(`Socket.IO server running on port ${PORT}`)
+})
+
+module.exports = { app, server, io }

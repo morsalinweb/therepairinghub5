@@ -38,7 +38,7 @@ const ReviewSchema = new mongoose.Schema(
   },
 )
 
-// Prevent user from submitting more than one review per job
-ReviewSchema.index({ job: 1, reviewer: 1 }, { unique: true })
+// Prevent user from submitting more than one review per reviewee (across all jobs)
+ReviewSchema.index({ reviewer: 1, reviewee: 1 }, { unique: true })
 
 export default mongoose.models.Review || mongoose.model("Review", ReviewSchema)

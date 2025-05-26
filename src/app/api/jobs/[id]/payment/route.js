@@ -6,7 +6,7 @@ import User from "../../../../../models/User"
 import Notification from "../../../../../models/Notification"
 import { handleProtectedRoute } from "../../../../../lib/auth"
 import { processStripePayment, processPayPalPayment } from "../../../../../lib/payment"
-// import { sendNotification } from "../../../../../lib/socket"
+import { sendNotification, broadcastJobUpdate } from "../../../../../lib/websocket-utils"
 
 export async function POST(req, { params }) {
   try {
@@ -15,7 +15,7 @@ export async function POST(req, { params }) {
     // Check authentication
     const authResult = await handleProtectedRoute(req, ["Buyer", "Admin"])
     if (!authResult.success) {
-      return authResult
+      return NextResponse.json({ success: false, message: authResult.message }, { status: authResult.status || 401 })
     }
 
     const jobId = params.id
@@ -181,29 +181,39 @@ export async function POST(req, { params }) {
     await quote.save()
 
     // Create notification for provider
-    const notification = await Notification.create({
-      recipient: providerId,
-      sender: authResult.user._id,
-      type: "hired",
-      message: `You have been hired for the job: ${job.title}`,
-      relatedId: job._id,
-      onModel: "Job",
-    })
-
-    // Send real-time notification
-    sendNotification(providerId.toString(), notification)
-
-    // Broadcast job update - REMOVED THIS CALL SINCE IT'S NOT DEFINED
-    // Instead of using broadcastJobUpdate, we'll use sendNotification to all relevant parties
     try {
-      // Notify the job poster
+      const notification = await Notification.create({
+        recipient: providerId,
+        sender: authResult.user._id,
+        type: "hired",
+        message: `You have been hired for the job: ${job.title}`,
+        relatedId: job._id,
+        onModel: "Job",
+      })
+
+      // Send real-time notification via WebSocket
+      sendNotification(providerId.toString(), notification)
+    } catch (notificationError) {
+      console.error("Error creating notification:", notificationError)
+      // Don't fail the payment for notification errors
+    }
+
+    // Broadcast job update via WebSocket
+    try {
+      broadcastJobUpdate(jobId, {
+        action: "hired",
+        job: job._id,
+        providerId,
+        message: `Provider has been hired for job: ${job.title}`,
+      })
+
+      // Send specific notifications to relevant parties
       sendNotification(job.postedBy.toString(), {
         type: "job_update",
         message: `Provider has been hired for job: ${job.title}`,
         job: job._id,
       })
 
-      // Notify the provider
       sendNotification(providerId.toString(), {
         type: "job_update",
         message: `You've been hired for job: ${job.title}`,

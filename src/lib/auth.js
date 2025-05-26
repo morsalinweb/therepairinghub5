@@ -1,3 +1,4 @@
+// lib/auth.js
 import jwt from "jsonwebtoken"
 import { serialize } from "cookie"
 import { NextResponse } from "next/server"

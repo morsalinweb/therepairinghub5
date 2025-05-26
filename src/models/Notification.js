@@ -1,6 +1,6 @@
 import mongoose from "mongoose"
 
-const NotificationSchema = new mongoose.Schema(
+const notificationSchema = new mongoose.Schema(
   {
     recipient: {
       type: mongoose.Schema.Types.ObjectId,
@@ -10,10 +10,23 @@ const NotificationSchema = new mongoose.Schema(
     sender: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
+      required: true,
     },
     type: {
       type: String,
-      enum: ["message", "quote", "job_posted", "job_updated", "job_completed", "payment", "review", "system"],
+      enum: [
+        "message",
+        "quote_received",
+        "quote_accepted",
+        "quote_rejected",
+        "job_update",
+        "job_completed",
+        "payment_received",
+        "review_received",
+        "hired",
+        "system",
+        "reminder",
+      ],
       required: true,
     },
     message: {
@@ -30,17 +43,22 @@ const NotificationSchema = new mongoose.Schema(
     },
     onModel: {
       type: String,
-      enum: ["Job", "Quote", "Message", "Review", "Transaction"],
+      enum: ["Job", "Quote", "Message", "Review", "User"],
+    },
+    data: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
     },
   },
-  { timestamps: true },
+  {
+    timestamps: true,
+  },
 )
 
 // Create indexes for better performance
-NotificationSchema.index({ recipient: 1, read: 1 })
-NotificationSchema.index({ recipient: 1, createdAt: -1 })
+notificationSchema.index({ recipient: 1, createdAt: -1 })
+notificationSchema.index({ read: 1 })
 
-// Export the model
-const Notification = mongoose.models.Notification || mongoose.model("Notification", NotificationSchema)
+const Notification = mongoose.models.Notification || mongoose.model("Notification", notificationSchema)
 
 export default Notification

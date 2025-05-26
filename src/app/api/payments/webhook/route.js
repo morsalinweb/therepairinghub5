@@ -6,7 +6,6 @@ import Transaction from "../../../../models/Transaction"
 import Job from "../../../../models/Job"
 import User from "../../../../models/User"
 import Notification from "../../../../models/Notification"
-import { sendNotification } from "../../../../lib/socket"
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET
@@ -96,9 +95,6 @@ async function handleCheckoutSessionCompleted(session) {
       onModel: "Transaction",
     })
 
-    // Send real-time notification
-    sendNotification(transaction.customer, notification)
-
     // Create notification for provider
     const providerNotification = await Notification.create({
       recipient: job.hiredProvider,
@@ -107,9 +103,6 @@ async function handleCheckoutSessionCompleted(session) {
       relatedId: job._id,
       onModel: "Job",
     })
-
-    // Send real-time notification to provider
-    sendNotification(job.hiredProvider, providerNotification)
 
     console.log("Checkout session completed for transaction:", transaction._id)
 
@@ -166,9 +159,6 @@ async function handlePaymentIntentSucceeded(paymentIntent) {
       onModel: "Transaction",
     })
 
-    // Send real-time notification
-    sendNotification(transaction.customer, notification)
-
     console.log("Payment successful for transaction:", transaction._id)
 
     // Schedule job completion after escrow period
@@ -213,9 +203,6 @@ async function handlePaymentIntentFailed(paymentIntent) {
       relatedId: transaction._id,
       onModel: "Transaction",
     })
-
-    // Send real-time notification
-    sendNotification(transaction.customer, notification)
 
     console.log("Payment failed for transaction:", transaction._id)
   } catch (error) {
@@ -272,12 +259,12 @@ async function completeJob(jobId) {
       await job.save()
 
       // Calculate provider amount (minus service fee)
-      const providerAmount = transaction.amount - transaction.serviceFee
+      const providerAmount = transaction.amount - (transaction.serviceFee || 0)
 
       // Update provider's available balance and total earnings
       await User.findByIdAndUpdate(job.hiredProvider, {
         $inc: {
-          availableBalance: providerAmount,
+          balance: providerAmount,
           totalEarnings: providerAmount,
         },
       })
@@ -298,10 +285,6 @@ async function completeJob(jobId) {
         relatedId: transaction._id,
         onModel: "Transaction",
       })
-
-      // Send real-time notifications
-      sendNotification(transaction.customer, buyerNotification)
-      sendNotification(job.hiredProvider, providerNotification)
 
       console.log(`Job ${jobId} completed and payment released automatically`)
     }

@@ -1,4 +1,4 @@
-// API utility functions for making requests to the backend
+// lib/api.js
 
 import axios from "axios"
 
@@ -226,8 +226,28 @@ export const userAPI = {
   },
 
   // Update user profile
-  updateProfile: async (userId, profileData) => {
+  updateProfile: async (profileData) => {
     try {
+      // Get user ID from auth token or localStorage
+      const token = localStorage.getItem("auth_token")
+      if (!token) {
+        return {
+          success: false,
+          message: "No authentication token found. Please log in again.",
+        }
+      }
+
+      // Decode JWT to get user ID
+      const payload = JSON.parse(atob(token.split(".")[1]))
+      const userId = payload.userId || payload.id || payload._id
+
+      if (!userId) {
+        return {
+          success: false,
+          message: "User ID not found in token. Please log in again.",
+        }
+      }
+
       const response = await axios.put(`/api/users/${userId}`, profileData)
       return response.data
     } catch (error) {
@@ -249,9 +269,10 @@ export const userAPI = {
 // Review API
 export const reviewAPI = {
   // Get reviews for a user
-  getReviews: async (userId) => {
+  getReviews: async (params = {}) => {
     try {
-      const response = await axios.get(`/api/reviews?user=${userId}`)
+      const queryParams = new URLSearchParams(params).toString()
+      const response = await axios.get(`/api/reviews?${queryParams}`)
       return response.data
     } catch (error) {
       return handleApiError(error)
@@ -259,9 +280,29 @@ export const reviewAPI = {
   },
 
   // Submit a review
-  submitReview: async (reviewData) => {
+  createReview: async (reviewData) => {
     try {
       const response = await axios.post("/api/reviews", reviewData)
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
+  },
+
+  // Update a review
+  updateReview: async (reviewId, reviewData) => {
+    try {
+      const response = await axios.put(`/api/reviews/${reviewId}`, reviewData)
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
+  },
+
+  // Delete a review
+  deleteReview: async (reviewId) => {
+    try {
+      const response = await axios.delete(`/api/reviews/${reviewId}`)
       return response.data
     } catch (error) {
       return handleApiError(error)
