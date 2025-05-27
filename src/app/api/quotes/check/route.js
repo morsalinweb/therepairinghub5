@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server"
 import connectToDatabase from "../../../../lib/db"
-import User from "../../../../models/User"
+import Quote from "../../../../models/Quote"
 import { handleProtectedRoute } from "../../../../lib/auth"
+
+// Force dynamic rendering
+export const dynamic = "force-dynamic"
 
 export async function GET(req) {
   try {
@@ -13,27 +16,23 @@ export async function GET(req) {
       return authResult
     }
 
-    // Get query parameters
     const { searchParams } = new URL(req.url)
-    const jobId = searchParams.get("job")
-    const userId = searchParams.get("user") || authResult.user._id
+    const jobId = searchParams.get("jobId")
 
-    // Validate input
     if (!jobId) {
-      return NextResponse.json({ success: false, message: "Please provide job ID" }, { status: 400 })
+      return NextResponse.json({ success: false, message: "Job ID is required" }, { status: 400 })
     }
 
-    // Check if user has submitted a quote for this job
-    const user = await User.findById(userId)
-    if (!user) {
-      return NextResponse.json({ success: false, message: "User not found" }, { status: 404 })
-    }
-
-    const exists = user.quotedJobs.some((qj) => qj.job.toString() === jobId)
+    // Check if user has already submitted a quote for this job
+    const existingQuote = await Quote.findOne({
+      job: jobId,
+      provider: authResult.user._id,
+    })
 
     return NextResponse.json({
       success: true,
-      exists,
+      hasQuote: !!existingQuote,
+      quote: existingQuote,
     })
   } catch (error) {
     console.error("Check quote error:", error)

@@ -3,7 +3,7 @@ import connectToDatabase from "../../../../lib/db"
 import Job from "../../../../models/Job"
 import Transaction from "../../../../models/Transaction"
 import { handleProtectedRoute } from "../../../../lib/auth"
-import { broadcastJobUpdate } from "../../../../lib/socket"
+import { broadcastJobUpdate } from "../../../../lib/websocket-utils"
 
 export async function POST(req) {
   try {

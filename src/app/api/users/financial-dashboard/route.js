@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server"
-import connectToDatabase from "@/lib/db"
-import Transaction from "@/models/Transaction"
-import { handleProtectedRoute } from "@/lib/auth"
-import User from "@/models/User"
+import connectToDatabase from "../../../../lib/db"
+import Transaction from "../../../../models/Transaction"
+import { handleProtectedRoute } from "../../../../lib/auth"
+import User from "../../../../models/User"
+
+// Force dynamic rendering
+export const dynamic = "force-dynamic"
 
 export async function GET(req) {
   try {

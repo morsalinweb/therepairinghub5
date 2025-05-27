@@ -3,6 +3,9 @@ import connectToDatabase from "../../../../lib/db"
 import Transaction from "../../../../models/Transaction"
 import { handleProtectedRoute } from "../../../../lib/auth"
 
+// Force dynamic rendering
+export const dynamic = "force-dynamic"
+
 // Get all transactions (admin only)
 export async function GET(req) {
   try {

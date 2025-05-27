@@ -3,6 +3,9 @@ import connectToDatabase from "../../../../lib/db"
 import Job from "../../../../models/Job"
 import { handleProtectedRoute } from "../../../../lib/auth"
 
+// Force dynamic rendering
+export const dynamic = "force-dynamic"
+
 // Get all jobs (admin only)
 export async function GET(req) {
   try {

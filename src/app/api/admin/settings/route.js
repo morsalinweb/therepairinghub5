@@ -3,6 +3,9 @@ import connectToDatabase from "../../../../lib/db"
 import { handleProtectedRoute } from "../../../../lib/auth"
 import { getEscrowPeriodMinutes, updateEscrowPeriod } from "../../../../lib/payment"
 
+// Force dynamic rendering
+export const dynamic = "force-dynamic"
+
 export async function GET(req) {
   try {
     await connectToDatabase()

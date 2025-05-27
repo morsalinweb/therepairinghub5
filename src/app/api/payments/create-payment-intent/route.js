@@ -1,9 +1,9 @@
 // /api/payments/create-payment-intent/route.js
 import { NextResponse } from "next/server"
 import Stripe from "stripe"
-import connectToDatabase from "../../../lib/db"
-import Job from "../../../models/Job"
-import { handleProtectedRoute } from "../../../lib/auth"
+import connectToDatabase from "../../../../lib/db"
+import Job from "../../../../models/Job"
+import { handleProtectedRoute } from "../../../../lib/auth"
 
 // Initialize Stripe
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)

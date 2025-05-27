@@ -5,6 +5,9 @@ import Job from "../../../../models/Job"
 import Transaction from "../../../../models/Transaction"
 import { handleProtectedRoute } from "../../../../lib/auth"
 
+// Force dynamic rendering
+export const dynamic = "force-dynamic"
+
 // Get admin dashboard stats
 export async function GET(req) {
   try {

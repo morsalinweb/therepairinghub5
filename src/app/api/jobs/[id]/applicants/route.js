@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server"
-import connectToDatabase from "../../../../lib/db"
-import Job from "../../../../models/Job"
-import User from "../../../../models/User"
-import { handleProtectedRoute } from "../../../../lib/auth"
+import connectToDatabase from "../../../../../lib/db"
+import Job from "../../../../../models/Job"
+import User from "../../../../../models/User"
+import { handleProtectedRoute } from "../../../../../lib/auth"
 
 // Get applicants for a job
 export async function GET(req, { params }) {

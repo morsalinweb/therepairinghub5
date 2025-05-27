@@ -5,7 +5,7 @@ import Transaction from "../../../../../models/Transaction"
 import Job from "../../../../../models/Job"
 import User from "../../../../../models/User"
 import Notification from "../../../../../models/Notification"
-import { sendNotification } from "../../../../../lib/socket"
+import { sendNotification } from "../../../../../lib/websocket-utils"
 
 export async function POST(req) {
   try {

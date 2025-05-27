@@ -6,7 +6,7 @@ import connectToDatabase from "../../../../../lib/db"
 import Transaction from "../../../../../models/Transaction"
 import Job from "../../../../../models/Job"
 import Notification from "../../../../../models/Notification"
-import { sendNotification } from "../../../../../lib/socket"
+import { sendNotification } from "../../../../../lib/websocket-utils"
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET

@@ -3,6 +3,9 @@ import connectToDatabase from "../../../../lib/db"
 import User from "../../../../models/User"
 import { handleProtectedRoute } from "../../../../lib/auth"
 
+// Force dynamic rendering
+export const dynamic = "force-dynamic"
+
 // Get all users (admin only)
 export async function GET(req) {
   try {

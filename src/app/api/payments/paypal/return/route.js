@@ -1,40 +1,61 @@
 import { NextResponse } from "next/server"
-import connectToDatabase from "../../../../lib/db"
-import { capturePayPalPayment } from "../../../../lib/payment"
+import connectToDatabase from "../../../../../lib/db"
+import Transaction from "../../../../../models/Transaction"
+import Job from "../../../../../models/Job"
+import User from "../../../../../models/User"
+
+// Force dynamic rendering
+export const dynamic = "force-dynamic"
 
 export async function GET(req) {
   try {
     await connectToDatabase()
 
-    // Get the PayPal order ID from the query parameters
-    const url = new URL(req.url)
-    const token = url.searchParams.get("token")
+    const { searchParams } = new URL(req.url)
+    const paymentId = searchParams.get("paymentId")
+    const PayerID = searchParams.get("PayerID")
+    const token = searchParams.get("token")
 
-    if (!token) {
-      return NextResponse.redirect(`${process.env.FRONTEND_URL || "/"}/payment-error?error=missing_token`)
+    if (!paymentId || !PayerID) {
+      return NextResponse.redirect(new URL("/payments/cancel", req.url))
     }
 
-    // Capture the payment
-    const captureResult = await capturePayPalPayment(token)
+    // Find the transaction
+    const transaction = await Transaction.findOne({
+      paypalPaymentId: paymentId,
+      status: "pending",
+    }).populate("job")
 
-    if (!captureResult.success) {
-      return NextResponse.redirect(
-        `${process.env.FRONTEND_URL || "/"}/payment-error?error=${encodeURIComponent(captureResult.error)}`,
-      )
+    if (!transaction) {
+      console.error("Transaction not found for PayPal payment:", paymentId)
+      return NextResponse.redirect(new URL("/payments/cancel", req.url))
     }
 
-    // Get the job ID from the transaction
-    const transaction = captureResult.transaction
-    if (!transaction || !transaction.job) {
-      return NextResponse.redirect(`${process.env.FRONTEND_URL || "/"}/payment-error?error=transaction_not_found`)
+    // Update transaction status
+    transaction.status = "in_escrow"
+    transaction.paypalPayerId = PayerID
+    await transaction.save()
+
+    // Update job status to in_progress and set escrow end time
+    const job = await Job.findById(transaction.job._id)
+    if (job) {
+      job.status = "in_progress"
+      job.escrowEndTime = new Date(Date.now() + 60 * 1000) // 1 minute from now
+      await job.save()
+
+      // Update provider's balance
+      const provider = await User.findById(job.hiredProvider)
+      if (provider) {
+        const providerAmount = transaction.amount - (transaction.serviceFee || 0)
+        provider.availableBalance = (provider.availableBalance || 0) + providerAmount
+        await provider.save()
+      }
     }
 
-    // Redirect to the job page
-    return NextResponse.redirect(`${process.env.FRONTEND_URL || "/"}/jobs/${transaction.job}`)
+    // Redirect to success page
+    return NextResponse.redirect(new URL(`/payments/success?transactionId=${transaction._id}`, req.url))
   } catch (error) {
     console.error("PayPal return error:", error)
-    return NextResponse.redirect(
-      `${process.env.FRONTEND_URL || "/"}/payment-error?error=${encodeURIComponent(error.message)}`,
-    )
+    return NextResponse.redirect(new URL("/payments/cancel", req.url))
   }
 }

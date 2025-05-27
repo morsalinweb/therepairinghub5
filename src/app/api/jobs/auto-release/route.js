@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server"
-import connectToDatabase from "../../../lib/db"
-import Job from "../../../models/Job"
-import Notification from "../../../models/Notification"
-import { releasePayment } from "../../../lib/payment"
-import { sendNotification } from "../../../lib/socket"
+import connectToDatabase from "../../../../lib/db"
+import Job from "../../../../models/Job"
+import Notification from "../../../../models/Notification"
+import { releasePayment } from "../../../../lib/payment"
+import { sendNotification } from "../../../../lib/websocket-utils"
 
 // This endpoint would be called by a cron job or scheduled task
 export async function POST(req) {

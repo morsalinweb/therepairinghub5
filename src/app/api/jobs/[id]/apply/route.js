@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server"
-import connectToDatabase from "../../../../lib/db"
-import Job from "../../../../models/Job"
-import User from "../../../../models/User"
-import Notification from "../../../../models/Notification"
-import { handleProtectedRoute } from "../../../../lib/auth"
-import { broadcastJobUpdate, sendNotification } from "../../../../lib/socket"
+import connectToDatabase from "../../../../../lib/db"
+import Job from "../../../../../models/Job"
+import User from "../../../../../models/User"
+import Notification from "../../../../../models/Notification"
+import { handleProtectedRoute } from "../../../../../lib/auth"
+import { broadcastJobUpdate, sendNotification } from "../../../../../lib/websocket-utils"
 
 // Apply for a job
 export async function POST(req, { params }) {
